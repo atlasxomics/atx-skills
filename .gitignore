@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+_selftest.pptx
+*.egg-info/
+.DS_Store
