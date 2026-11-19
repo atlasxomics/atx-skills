@@ -205,9 +205,10 @@ Neighborhood, Compare, Bulk Score Genes. `atx_plots_lib.py` in this skill is lif
 
 **compare clusters** (repo `combined_cluster_wf`) → `latch:///compare_outs/<name>/`. Pairwise
 `getMarkerFeatures` between GroupA and GroupB (by cluster / condition / sample, barcode
-lists, or a file) on an ArchRProject. At most 500 cells per group by default; `closest=True`.
-Writes `all_{genes,peaks,motifs}.csv`, `marker_{genes,motifs}.csv`, `up/downRegulated_motifs.csv`
-and its own volcano/MA PDFs. It is normally launched from the Plots Compare tab, which this
+lists, or a file) on an ArchRProject. At most 500 cells per group by default; `closest` is
+True for a direct launch but False from Plots. Writes `gene_results/`, `peak_results/`,
+`motif_results/`, `coverages/` and `UpdateClustName_by_barcode.csv`. Method, defects and how
+to read it: `references/differential_analysis.md`. It is normally launched from the Plots Compare tab, which this
 skill cannot do. A deck's comparison slide must be fetched from a run that already exists.
 
 ### Other epigenomic helpers

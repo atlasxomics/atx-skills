@@ -19,18 +19,38 @@ project outputs on Latch.
 
 ## Before anything else: where this runs
 
-**Every Latch operation must run on the `ssh:analysis-box` compute target.** The Latch
-token lives only on that box, latch.bio is not reachable from the local sandbox, and the
-objects are far too large to move (a single `combined_ge.h5ad` is ~18 GB). If
-`list_compute` does not show `ssh:analysis-box`, stop and tell the user — nothing here
-works without it.
+**Heavy work runs on the `ssh:analysis-box` compute target.** The box has the Latch
+token, the analysis environment and the disk, and the objects are far too large to move
+anywhere else (a single `combined_ge.h5ad` is ~18 GB). If `list_compute` does not show
+`ssh:analysis-box`, tell the user that figures cannot be generated without it.
+
+**Latch may or may not also work locally.** Some scientists' machines have the `latch` CLI
+installed and signed in; many do not. Check once, quietly (`latch ls latch:///compare_outs`
+or similar). Don't ask about it.
+
+- **If it works locally**, use it for searching and light work: listing projects and runs,
+  reading small tables (`tables/*.csv`, `medians.csv`, `run_metrics/summary.csv`, Compare
+  result CSVs), and quick counts or summaries on them. Point the scripts at it with
+  `LATCH_BIN=$(which latch)` and give `Project(..., cache=<a local scratch dir>)`, since
+  the default `/data/analysis_cache` exists only on the box. If downloads fail with `CERTIFICATE_VERIFY_FAILED`, set
+  `SSL_CERT_FILE=/etc/ssl/cert.pem` on the command; that is a fix you apply, not one the
+  scientist does.
+- **If it does not**, do everything Latch-related on the box and don't mention it.
+- **Either way**, large downloads and heavy computation go to the box: h5ad objects,
+  bigwigs, fragments files, ArchRProjects, and all figure computation and rendering.
+
+**Do not hand setup work to the scientist.** If something would only work after manual
+work on their side, such as installing the CLI, creating a Latch API key or signing in,
+you may say so once in passing, but do not ask them to do it and do not wait on it. Carry
+on with the box.
 
 The split that matters:
 
-- **On the box**: every `latch ls` / `latch cp`, all table and h5ad reads, all figure
-  computation and PNG rendering.
+- **On the box**: large `latch cp` downloads, all h5ad reads, all figure computation and
+  PNG rendering.
 - **Locally**: reading the user's PDFs, writing code, assembling the PowerPoint deck
-  (inputs are small harvested PNGs by then), saving artifacts.
+  (inputs are small harvested PNGs by then), saving artifacts, and the light Latch work
+  above when the CLI works there.
 
 The first `call_command` after the box has idled fails with a banner-exchange timeout;
 retry once after ~30 s. If it fails instead with
@@ -155,6 +175,11 @@ pin exact category colours, `natural_sort()` orders C1...C15 numerically for dis
 and `observation_legend_title()` draws the two-line "Observation:" legend header.
 
 ## Differential motifs: FETCH the statistics, never recompute them
+
+For any differential result (genes, peaks or motifs, on a slide or in an answer), read
+`references/differential_analysis.md` first and use `scripts/atx_compare.py`. GroupA and
+GroupB rows are separate tests, so report one side; there are three different significance
+rules, and two known defects in the workflow's own output files.
 
 This is the one slide whose NUMBERS cannot be produced here. MeanDiff and FDR come from
 `ArchR::getMarkerFeatures`, run as a Latch **Compare Workflow** launched from the Plots

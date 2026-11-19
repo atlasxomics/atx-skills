@@ -11,20 +11,25 @@ SKILL.md                      the skill itself (instructions + triggering descri
 scripts/atx_plots_lib.py      GUI-free plotting functions lifted from atlasxomics/plots_epigenome
 scripts/atx_project.py        Latch project -> table-first data access
 scripts/atx_figures.py        one generator per report figure
+scripts/atx_compare.py        differential analysis: fetch, check and plot compare clusters runs
 scripts/atx_deck.py           PowerPoint assembly (runs locally, not on the box)
 references/figure_catalog.md  provenance of every figure, measured geometry, QC column rules
 references/pipeline.md        the ATX processing pipeline (epigenomics in depth; WT and co-profiling in brief)
 references/deck.md            deck assembly: template, slide structures, validation, layout traps
+references/differential_analysis.md   how compare clusters computes differential genes/peaks/motifs
 references/comparison_Demo_001.md   regenerated vs delivered, panel by panel
 assets/atx_template.pptx      branded template: a delivered deck with its slides stripped
 ```
 
 ## Prerequisites
 
-The only hard requirement is the **`ssh:analysis-box` compute target**. Every Latch
-operation runs there: the token lives on that box, latch.bio is unreachable from a local
-sandbox, and the objects are too large to move (`combined_ge.h5ad` is ~18 GB). Nothing
-installs on a scientist's machine.
+The only hard requirement is the **`ssh:analysis-box` compute target**. Large downloads and
+all heavy computation run there: the box has a Latch token, and the objects are too large to
+move (`combined_ge.h5ad` is ~18 GB). Nothing needs to be installed on a scientist's machine.
+
+If a scientist's machine happens to have the `latch` CLI installed and signed in, the skill
+also uses it for searching and reading small tables. It never asks a scientist to set that
+up; without it, everything Latch-related runs on the box.
 
 The box needs, and currently has:
 
