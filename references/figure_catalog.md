@@ -30,7 +30,7 @@ code; every "absent" entry was confirmed by searching all five repositories.
 | 6 | Gene-activity feature panels (gene x sample + UMAP) | Demo_002 9-10, Demo_001 8-9, Demo_003 6-8 | C (equiv. B) | `plot_umap_for_samples(color_by=<gene>)` + `convert_feature_expression` (init.py:198) | `combined_ge.h5ad` feature matrix |
 | 7 | Peaks per cluster / per sample | Demo_003 9, Demo_002 11, Demo_001 10 | A (equiv. B) | ArchR peak-call summary. `PeakAnno` occurs in archrproject_latch/wf/archr_objs.R; `UnionPeaks`/`Number of Peaks` were not in the files searched (all .py in the three Plots repos plus archr_objs.R, archr.R, figure_gallery.py, plotting.py, peaks.py — **not** every R file in archrproject_latch/ATX_snap). The figure is nonetheless workflow-generated: the table and PDF are both delivered in the project output | `tables/Clusters_Peak-Call-Summary.csv`, `Sample_Peak-Call-Summary.csv` — columns `Group,Var1,Freq`, Group already carrying the `C1(n = ...)` label and Freq already in thousands. Figures also delivered as `figures/*_Peak-Call-Summary_Date-*` |
 | 8 | Differential motif panels | Demo_002 12, Demo_001 11 | B | `plot_motif_logo` (init.py:641), `plotly_heatmap`, `violin_plots/violin_plot.py`, `plot_ranked_feature_plotly` (init.py:1718) | `combined_motifs.h5ad`, `tables/enrichedMotifs_cluster.csv`, `motif_per_cluster_hm.csv`, `seurat_objects/seqlogo.rds` |
-| 9 | Appendix QC table | Demo_003 13, Demo_002 14, Demo_001 14 | D | none | `tables/medians.csv` + `run_metrics/pycistopic_metrics/summary.csv` (read count, duplicate fraction) |
+| 9 | Appendix QC table | Demo_003 13, Demo_002 14, Demo_001 14 | D | none | `tables/medians.csv` + `run_metrics/summary.csv` (read count, duplicate fraction) |
 | 10 | Spatial QC maps (TSS enrichment, log10 nFrags) | Demo_001 14 | C (equiv. B) | `plot_umap_for_samples(color_by='TSSEnrichment'\|'log10_nFrags')` | `obs` QC columns in `combined_ge.h5ad` |
 | 12 | QC distribution violins | Demo_002 14 | B | `qc_violin` in atx_figures.py, reproducing plots_epigenome/violin_plots/violin_plot.py (`create_violin_data` + `sort_group_categories` + `build_discrete_color_map` + `px.violin(box=True, points=False)`) | `tables/obs.csv`: `log10_nFrags`, `TSSEnrichment`, grouped by `SampleName` |
 | 11 | Volcano plots (not used in these three decks) | — | A (equiv. B) | `figures/volcano_plots_<cond>.pdf` (archr_objs.R:926); portable `plot_volcano` (init.py:1628) + `make_volcano_df` (init.py:1223) | `tables/volcanoMarkers_genes_<n>.csv`, `volcanoMarkers_motifs_<n>.csv` |
@@ -67,7 +67,7 @@ delivered deck:
   nearest hundred for median fragments). Reproduced exactly on a delivered deck.
 - **The QC table needs a join across two workflows.** `Number of reads` and
   `Fraction Duplicates` are not in `medians.csv`; they come from
-  `fastq2frags/<run_id>/run_metrics/pycistopic_metrics/summary.csv`. The generator must resolve
+  `fastq2frags/<run_id>/run_metrics/summary.csv`. The generator must resolve
   the preprocessing directory for each run, not just the analysis project.
 - **`condition` in medians.csv is the deck's sample label** (CondA / CondB / CondC).
 - **Object sizes force a table-first design.** In Demo_001 `combined_ge.h5ad` is 19 GB and

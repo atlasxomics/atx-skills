@@ -13,6 +13,8 @@ scripts/atx_project.py        Latch project -> table-first data access
 scripts/atx_figures.py        one generator per report figure
 scripts/atx_deck.py           PowerPoint assembly (runs locally, not on the box)
 references/figure_catalog.md  provenance of every figure, measured geometry, QC column rules
+references/pipeline.md        the ATX processing pipeline (epigenomics in depth; WT and co-profiling in brief)
+references/deck.md            deck assembly: template, slide structures, validation, layout traps
 references/comparison_Demo_001.md   regenerated vs delivered, panel by panel
 assets/atx_template.pptx      branded template: a delivered deck with its slides stripped
 ```
