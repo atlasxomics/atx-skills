@@ -5,7 +5,9 @@ Differential statistics on a Data Report come from the **compare clusters** Latc
 `ArchR::getMarkerFeatures` on an ArchRProject between two cell groups, GroupA and GroupB.
 It is normally launched from the Compare tab of the Epigenomics Plots app
 (`plots_epigenome/compare/`). This module does not recompute any statistic: it fetches
-the workflow's tables, checks them, and draws the same views Plots draws.
+the workflow's tables, checks them, and draws the same views Plots draws. When no run
+exists it can prepare one and, only after the scientist confirms, launch it
+(`describe_launch`, `check_launch`, `launch_compare`, `wait_for_run`).
 
 See references/differential_analysis.md for the method and the traps. In short:
 
@@ -35,7 +37,7 @@ from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
-from atx_project import LATCH, Project
+from atx_project import LATCH, Project, latch_ls
 
 COMPARE_ROOT = "latch:///compare_outs"
 
@@ -69,18 +71,8 @@ _CONFIG_RE = re.compile(
 # ------------------------------------------------------------------ listing runs
 
 def _latch_ls(path: str, timeout: int = 300) -> List[str]:
-    """Names in a Latch directory (directories keep their trailing '/')."""
-    cmd = f"{shlex.quote(LATCH)} ls {shlex.quote(path)}"
-    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    if p.returncode != 0:
-        raise RuntimeError(f"latch ls failed for {path}\n{p.stderr[-800:]}")
-    names = []
-    for line in p.stdout.splitlines():
-        line = line.rstrip()
-        if not line or line.lstrip().startswith(("Size", "WARN", "Please")):
-            continue
-        names.append(line.split()[-1])
-    return names
+    """Full names in a Latch directory (directories keep their trailing '/')."""
+    return latch_ls(path, timeout)
 
 
 def list_compare_runs() -> List[str]:
@@ -307,9 +299,9 @@ def write_groupings_file(obs: pd.DataFrame, column: str, group_a, group_b,
     (obs.csv from the analysis project). Mirrors check_selection.py: a categorical column
     (fewer than 30 distinct values), two different values, both non-empty, no overlap.
 
-    This only PREPARES a run. Launching it is the scientist's step (Plots Compare tab, or
-    the compare clusters workflow in Latch with `groupings` set to this file once it is
-    uploaded); the skill never launches workflows.
+    The file is written locally; `upload_groupings()` puts it in the project root where
+    Plots would have put it, and `launch_compare()` starts the run once the scientist has
+    confirmed it.
     """
     if column not in obs:
         raise KeyError(f"{column!r} not in obs")
@@ -340,7 +332,7 @@ def write_groupings_file(obs: pd.DataFrame, column: str, group_a, group_b,
 def launch_parameters(project: Project, run_name: str, groupings_remote: str,
                       max_cells: int = 500, use_max_possible_cells: bool = False,
                       closest: bool = False) -> dict:
-    """The parameters to give the scientist for launching compare clusters.
+    """The compare clusters inputs for a File-mode run, as Plots builds them.
 
     `closest` defaults to False because that is what a Plots launch sends unless the
     "Closest cells" box is ticked; the workflow's own default is True. Results differ
@@ -356,3 +348,171 @@ def launch_parameters(project: Project, run_name: str, groupings_remote: str,
             "archrproject": f"{project.latch_root}/{project.name}_ArchRProject",
             "max_cells": max_cells, "use_max_possible_cells": use_max_possible_cells,
             "closest": closest}
+
+
+# ------------------------------------------------------------------ launching (confirmed)
+#
+# Launching costs compute and writes to the scientist's workspace, so it happens only after
+# the scientist has said yes to the exact summary `describe_launch()` produces. Pass
+# `confirmed=True` only then. Runs from any interpreter that has the latch Python package
+# (>= 2.62) and a signed-in token: analysis-box's /opt/analysis venv, or locally when the
+# CLI works there.
+
+COMPARE_WF = "wf.__init__.compare_workflow"
+#: The version the Plots Compare tab launches (plots_epigenome/compare/launch_workflow.py).
+#: It predates the v0.10.9 fixes, so its output still needs the guards above.
+PLOTS_PINNED_VERSION = "0.10.6-c5165d-8acb83"
+
+
+def registered_versions(timeout: int = 300) -> pd.DataFrame:
+    """Every registered compare clusters version in this workspace, oldest first. `dev`
+    marks `-wip-` builds (registered from uncommitted code); launch a release, not those.
+    Pass the full `version` string (e.g. 0.10.6-c5165d-8acb83) to the launch helpers."""
+    cmd = f"{shlex.quote(LATCH)} get-wf --name {shlex.quote(COMPARE_WF)}"
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    rows = []
+    for line in p.stdout.splitlines():
+        parts = [x.strip() for x in line.split("\t")]
+        if len(parts) == 3 and parts[1] == COMPARE_WF and re.match(r"\d+\.\d+\.\d+", parts[2]):
+            rows.append({"id": parts[0], "version": parts[2], "dev": "-wip-" in parts[2]})
+    if not rows:
+        raise RuntimeError(f"no versions of {COMPARE_WF} listed\n{p.stdout[-400:]}\n{p.stderr[-400:]}")
+    df = pd.DataFrame(rows)
+    df["semver"] = df["version"].map(_semver)
+    return df.sort_values(["semver", "id"]).reset_index(drop=True)
+
+
+def latest_release() -> str:
+    """The newest registered non-dev version."""
+    rel = registered_versions().query("~dev")
+    return rel["version"].iloc[-1]
+
+
+def upload_groupings(project: Project, info: dict, timeout: int = 600) -> str:
+    """Upload a `write_groupings_file()` result to the project root, where Plots puts its
+    compare_config files (so `find_compare_configs()` sees it). Returns the remote path."""
+    remote = f"{project.latch_root}/{info['file']}"
+    cmd = f"{shlex.quote(LATCH)} cp {shlex.quote(info['path'])} {shlex.quote(remote)}"
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    if p.returncode != 0 or info["file"] not in _latch_ls(project.latch_root):
+        raise RuntimeError(f"upload of {info['file']} failed\n{p.stdout[-800:]}\n{p.stderr[-800:]}")
+    return remote
+
+
+def _semver(version: str) -> tuple:
+    """(0, 10, 6) from '0.10.6-c5165d-8acb83'."""
+    return tuple(int(x) for x in re.match(r"(\d+)\.(\d+)\.(\d+)", version).groups())
+
+
+def describe_launch(params: dict, version: str, groups: Optional[dict] = None) -> str:
+    """The summary to show the scientist before launching. `groups` is the
+    `write_groupings_file()` result, for what each group is and its size."""
+    lines = [f"Launch compare clusters {version} ({COMPARE_WF})",
+             f"  output: {COMPARE_ROOT}/{params['project_name']}/",
+             f"  ArchRProject: {params['archrproject']}",
+             f"  groupings file: {params['groupings']}"]
+    if groups:
+        if groups["file"] != params["groupings"].rstrip("/").rsplit("/", 1)[-1]:
+            raise ValueError(f"groups describe {groups['file']} but the launch uses "
+                             f"{params['groupings']}")
+        lines.append(f"  GroupA = {groups['column']} == {groups['GroupA']!r} ({groups['n_groupA']} cells)")
+        lines.append(f"  GroupB = {groups['column']} == {groups['GroupB']!r} ({groups['n_groupB']} cells)")
+    cap = ("min(nA, nB) cells per group" if params["use_max_possible_cells"]
+           else f"at most {params['max_cells']} cells per group")
+    lines.append(f"  cell cap: {cap}")
+    lines.append(f"  closest: {params['closest']} "
+                 f"({'workflow default' if params['closest'] else 'what Plots sends'})")
+    if _semver(version) < (0, 10, 9):
+        lines.append("  note: this version predates the v0.10.9 fixes (motif direction labels, "
+                     "peak annotation join, multiple-condition matching)")
+    lines.append("Uses Latch compute in the scientist's workspace.")
+    return "\n".join(lines)
+
+
+def _to_inputs(params: dict) -> dict:
+    import latch.ldata.path  # noqa: F401  (import first: avoids a latch_cli import cycle)
+    from latch.types.directory import LatchDir
+    from latch.types.file import LatchFile
+    from latch_cli.utils.path import normalize_path
+    # Pin both to this workspace (latch://<id>.account/...) rather than relying on how
+    # latch:/// resolves inside the execution.
+    out = dict(params)
+    out["groupings"] = LatchFile(normalize_path(params["groupings"]))
+    out["archrproject"] = LatchDir(normalize_path(params["archrproject"]))
+    return out
+
+
+def check_launch(params: dict, version: str, groups: Optional[dict] = None) -> dict:
+    """Everything `launch_compare()` checks, without launching: the workflow version is
+    registered in this workspace, the inputs convert to its interface, the inputs exist and
+    the output folder is free. Safe to call before asking the scientist.
+
+    Pass `groups` (the `write_groupings_file()` result) before the upload: the groupings
+    file is then checked locally instead of on Latch."""
+    from latch.utils import current_workspace
+    from latch_cli.services.launch.interface import get_workflow_interface
+    from latch_cli.services.launch.type_converter import convert_inputs_to_literals
+    import google.protobuf.json_format as gpjson
+    from flyteidl.core import interface_pb2
+    from flytekit.models.interface import VariableMap
+
+    run = params["project_name"]
+    if f"{run}/" in _latch_ls(COMPARE_ROOT):
+        raise ValueError(f"{COMPARE_ROOT}/{run}/ already exists; pick another run name "
+                         "(a second run into the same folder mixes outputs)")
+    remote_keys = ["archrproject"]
+    if groups is None:
+        remote_keys.append("groupings")
+    elif (groups["file"] != params["groupings"].rstrip("/").rsplit("/", 1)[-1]
+          or not os.path.isfile(groups["path"])):
+        raise ValueError(f"groupings {params['groupings']} does not match the local file "
+                         f"{groups['path']}")
+    for key in remote_keys:
+        parent, name = params[key].rstrip("/").rsplit("/", 1)
+        if not any(n.rstrip("/") == name for n in _latch_ls(parent)):
+            raise FileNotFoundError(f"{key} not found: {params[key]}")
+    ws = current_workspace()
+    wf_id, interface, _ = get_workflow_interface(ws, COMPARE_WF, version)
+    types = VariableMap.from_flyte_idl(
+        gpjson.ParseDict(interface, interface_pb2.VariableMap())).variables
+    convert_inputs_to_literals(params=_to_inputs(params), flyte_interface_types=types)
+    return {"workspace": ws, "workflow_id": wf_id, "version": version}
+
+
+def launch_compare(params: dict, version: str, *, confirmed: bool = False) -> dict:
+    """Launch compare clusters. Only after the scientist has approved `describe_launch()`
+    for these exact params and version; `confirmed` must say so.
+
+    Returns a record to keep with the run (execution id, version, every input including
+    `closest`, which the run's output folder does not record)."""
+    if not confirmed:
+        raise PermissionError("show describe_launch() to the scientist and launch only "
+                              "after they say yes; then pass confirmed=True")
+    check_launch(params, version)
+    from latch_cli.services.launch.launch_v2 import launch
+    ex = launch(wf_name=COMPARE_WF, params=_to_inputs(params), version=version)
+    return {"execution_id": str(ex.id), "workflow": COMPARE_WF, "version": version,
+            "launched_at": datetime.now().isoformat(timespec="seconds"),
+            "output": f"{COMPARE_ROOT}/{params['project_name']}/", "params": dict(params)}
+
+
+def wait_for_run(execution_id: str, poll_seconds: int = 60, timeout_hours: float = 12,
+                 progress=print) -> str:
+    """Poll a launched run until it finishes. Returns SUCCEEDED, FAILED or ABORTED; raises
+    TimeoutError after `timeout_hours`. Run it in the background: compare clusters takes
+    tens of minutes to hours. The workflow succeeds even when its optional peak or motif
+    steps fail, so check `load_run(...).missing` afterwards."""
+    import time
+    from latch_cli.services.launch.launch_v2 import Execution
+    ex = Execution(id=str(execution_id), python_outputs={})
+    deadline = time.time() + timeout_hours * 3600
+    last = None
+    for _ in ex.poll():
+        if ex.status != last:
+            progress(f"{datetime.now():%H:%M:%S} execution {execution_id}: {ex.status}")
+            last = ex.status
+        if ex.status in {"SUCCEEDED", "FAILED", "ABORTED"}:
+            return ex.status
+        if time.time() > deadline:
+            raise TimeoutError(f"execution {execution_id} still {ex.status} after {timeout_hours} h")
+        time.sleep(poll_seconds)

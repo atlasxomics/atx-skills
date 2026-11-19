@@ -18,6 +18,58 @@ import pandas as pd
 
 LATCH = os.environ.get("LATCH_BIN", "/opt/analysis/bin/latch")
 
+_LS_QUERY = """
+query LDataChildren($argPath: String!) {
+  ldataResolvePathData(argPath: $argPath) {
+    finalLinkTarget {
+      childLdataTreeEdges(filter: {child: {removed: {equalTo: false},
+          pending: {equalTo: false}, copiedFrom: {isNull: true}}}) {
+        nodes { child { name type } }
+      }
+    }
+  }
+}"""
+
+
+def latch_ls(path: str, timeout: int = 300) -> List[str]:
+    """Names in a Latch directory, directories with a trailing '/'.
+
+    `latch ls` cuts names longer than 50 characters to 47 + '...' (Plots' compare_config
+    files, morphology TIFs), so the names come from the Latch API when the latch Python
+    package is importable, and from the CLI only as a fallback, which refuses to return
+    a cut name rather than hand back one that matches nothing."""
+    try:
+        import gql
+        import latch.ldata.path  # noqa: F401  (import first: avoids a latch_cli import cycle)
+        from latch_cli.utils.path import normalize_path
+        from latch_sdk_gql.execute import execute
+    except ImportError:
+        execute = None
+    if execute is not None:
+        data = execute(gql.gql(_LS_QUERY), {"argPath": normalize_path(path)})["ldataResolvePathData"]
+        if data is None:
+            raise FileNotFoundError(f"no such Latch directory: {path}")
+        nodes = data["finalLinkTarget"]["childLdataTreeEdges"]["nodes"]
+        return sorted(n["child"]["name"] + ("" if str(n["child"]["type"]).lower() == "obj" else "/")
+                      for n in nodes)
+    cmd = f"{shlex.quote(LATCH)} ls {shlex.quote(path)}"
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    if p.returncode != 0:
+        if "no such" in (p.stdout + p.stderr).lower():
+            raise FileNotFoundError(f"no such Latch directory: {path}")
+        raise RuntimeError(f"latch ls failed for {path}\n{p.stderr[-800:]}")
+    names = []
+    for line in p.stdout.splitlines():
+        line = line.rstrip()
+        if not line or line.lstrip().startswith(("Size", "WARN", "Please")):
+            continue
+        name = line.split(None, 2)[-1] if line.lstrip().startswith("-") else line.split(None, 4)[-1]
+        if name.rstrip("/").endswith("..."):
+            raise RuntimeError(f"`latch ls` truncated a name in {path} ({name}); run where "
+                               "the latch Python package is importable (analysis-box venv)")
+        names.append(name)
+    return names
+
 ANALYSIS_DIRS = {"archr": "epi_analysis_archr", "snap": "epi_analysis_snap"}
 
 # Small tables that are safe to pull wholesale (all well under 100 MB).

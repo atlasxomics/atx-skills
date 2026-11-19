@@ -181,9 +181,9 @@ For any differential result (genes, peaks or motifs, on a slide or in an answer)
 GroupB rows are separate tests, so report one side; there are three different significance
 rules, and two known defects in the workflow's own output files.
 
-This is the one slide whose NUMBERS cannot be produced here. MeanDiff and FDR come from
-`ArchR::getMarkerFeatures`, run as a Latch **Compare Workflow** launched from the Plots
-app (`plots_epigenome/compare/`). Recomputing them in Python -- a scanpy t-test, say --
+This is the one slide whose NUMBERS cannot be computed here. MeanDiff and FDR come from
+`ArchR::getMarkerFeatures`, run as the Latch **compare clusters** workflow (usually
+launched from the Plots Compare tab, `plots_epigenome/compare/`). Recomputing them in Python -- a scanpy t-test, say --
 gives different numbers from the delivered deck for the same cells. Fetch the workflow
 output instead:
 
@@ -197,8 +197,28 @@ F.apply_compare_annotation(cells, ann, "CD19_high",
 Runs live at `latch:///compare_outs/<run>/` with `motif_results/all_motifs.csv`,
 `gene_results/`, `peak_results/`, per-group `coverages/`, and
 `UpdateClustName_by_barcode.csv`. **List `latch:///compare_outs` first** -- if a run for
-this comparison already exists, use it; if none does, the scientist must launch the
-Compare workflow from the Plots app, which this skill cannot do.
+this comparison already exists, use it.
+
+**If none exists, you may launch one, but only after the scientist says yes.** A launch
+uses Latch compute in their workspace and writes a new `compare_outs/<run>/`, so it is
+never a side effect of another request:
+
+1. Build the groups (`write_groupings_file`) and the inputs (`launch_parameters`), and
+   run `check_launch(params, version, info)` (no launch: it checks the version, inputs
+   and output folder, and the not-yet-uploaded groupings file locally).
+2. Show the scientist `describe_launch` and ask. It names the workflow version, the two
+   groups and their sizes, the cell cap and `closest`. Use `latest_release()` (the newest
+   non-`wip` build) unless they want to match an earlier Plots run. Plots launches 0.10.6,
+   which predates the v0.10.9 fixes. `closest=False` matches Plots.
+3. Only on a clear yes: `upload_groupings`, then `launch_compare(..., confirmed=True)`.
+   One yes covers one launch. A changed group, version or setting needs a new yes.
+4. Keep the returned record (execution id, version, `closest`) with the work. The run's
+   output folder does not record those. Wait with `wait_for_run` in the background (tens
+   of minutes to hours), then load the run as for any other.
+
+Launch from analysis-box, or locally if the latch Python package works there. If the
+scientist declines, or nothing can launch, say which run is missing and stop. Do not fall
+back to recomputing.
 
 - **Use the run's own cell assignment**, not a re-derived threshold. The delivered
   subtitle says "Cd19 gene activity score higher than 0.6", but re-thresholding can select

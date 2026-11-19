@@ -21,9 +21,8 @@ Sources (read in full, not summarised from the docs):
 **Fetch the statistics, never recompute them.** The numbers come from
 `ArchR::getMarkerFeatures` with bias matching and a cell cap. A scanpy or scipy test on the
 same cells gives different numbers, and the deck will not match anything the customer
-can reproduce. If no run exists for the comparison, the scientist launches one. The
-skill prepares the inputs (`write_groupings_file`, `launch_parameters`) but never
-launches a workflow.
+can reproduce. If no run exists for the comparison, launch one, but only after the
+scientist approves it (see "Launching a run" below).
 
 ## End to end
 
@@ -187,3 +186,33 @@ group is), the cell counts, the test, the threshold, and `closest` if known. Exa
 "Motif activity, GroupA (<what GroupA is>, 828 cells) vs GroupB (<what GroupB is>, 1575
 cells), ArchR Wilcoxon on chromVAR deviations, FDR ≤ 0.05 and |MeanDiff| ≥ 0.01: 92 motifs
 higher in GroupA" (the `jm_test` numbers).
+
+## Launching a run
+
+Only after the scientist says yes to the exact launch. A launch costs compute in their
+workspace and writes a new `compare_outs/<run>/`.
+
+```python
+version = C.latest_release()      # newest non-wip build; C.registered_versions() lists all
+info = C.write_groupings_file(obs, "condition", "WT", "KO", out_dir=scratch, dataset=project.name)
+params = C.launch_parameters(project, "<run>", f"{project.latch_root}/{info['file']}",
+                             closest=False)               # False = what Plots sends
+C.check_launch(params, version, info)   # version registered, inputs convert, folder free
+print(C.describe_launch(params, version, info))           # show this; ask; wait for yes
+# --- only after a clear yes, for exactly these params and version ---
+C.upload_groupings(project, info)                          # project root, as Plots does
+rec = C.launch_compare(params, version, confirmed=True)   # keep rec: id, version, closest
+C.wait_for_run(rec["execution_id"])                        # run in the background
+```
+
+- **Version.** `C.PLOTS_PINNED_VERSION` (`0.10.6-c5165d-8acb83`) is what Plots launches
+  and has the defects above. Prefer `latest_release()` unless the scientist wants to
+  match an earlier Plots run. Builds with `-wip-` in the version were registered from
+  uncommitted code; don't launch those for a customer. Today 0.10.6 is also the latest
+  release (0.10.7 and 0.10.8 exist only as `wip` builds). The fixes reach a launch once
+  0.10.9 is registered. `check_launch` raises if a version is not registered.
+- **The run name must be new.** `check_launch` refuses an existing `compare_outs/<run>/`.
+- **`closest`.** Default False, as Plots sends. `describe_launch` shows it, and the
+  launch record keeps it, because the output folder does not.
+- **Failure.** A run can succeed with peak or motif steps missing
+  (`analysis_errors.log`), so check `load_run(...).missing` before reporting.

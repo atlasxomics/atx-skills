@@ -357,12 +357,11 @@ def fetch_morphology_image(project, run_id, roots=IMAGE_ROOTS):
     short = short_run_id(run_id)
     for root in roots:
         folder = f"{root}/{short}"
-        from atx_project import LATCH
-        p = subprocess.run(f"{shlex.quote(LATCH)} ls {shlex.quote(folder)}",
-                           shell=True, capture_output=True, text=True, timeout=300)
-        if p.returncode != 0 and "no such directory" in (p.stdout + p.stderr).lower():
+        from atx_project import latch_ls
+        try:
+            names = [n for n in latch_ls(folder) if "_fix" in n and not n.endswith("/")]
+        except FileNotFoundError:
             continue
-        names = [ln.split()[-1] for ln in p.stdout.splitlines() if "_fix" in ln]
         if not names:
             continue
         name = sorted(names)[0]

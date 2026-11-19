@@ -11,7 +11,8 @@ SKILL.md                      the skill itself (instructions + triggering descri
 scripts/atx_plots_lib.py      GUI-free plotting functions lifted from atlasxomics/plots_epigenome
 scripts/atx_project.py        Latch project -> table-first data access
 scripts/atx_figures.py        one generator per report figure
-scripts/atx_compare.py        differential analysis: fetch, check and plot compare clusters runs
+scripts/atx_compare.py        differential analysis: fetch, check and plot compare clusters runs;
+                              launch a new one after the scientist confirms
 scripts/atx_deck.py           PowerPoint assembly (runs locally, not on the box)
 references/figure_catalog.md  provenance of every figure, measured geometry, QC column rules
 references/pipeline.md        the ATX processing pipeline (epigenomics in depth; WT and co-profiling in brief)

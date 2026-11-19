@@ -208,8 +208,9 @@ Neighborhood, Compare, Bulk Score Genes. `atx_plots_lib.py` in this skill is lif
 lists, or a file) on an ArchRProject. At most 500 cells per group by default; `closest` is
 True for a direct launch but False from Plots. Writes `gene_results/`, `peak_results/`,
 `motif_results/`, `coverages/` and `UpdateClustName_by_barcode.csv`. Method, defects and how
-to read it: `references/differential_analysis.md`. It is normally launched from the Plots Compare tab, which this
-skill cannot do. A deck's comparison slide must be fetched from a run that already exists.
+to read it: `references/differential_analysis.md`. It is normally launched from the Plots
+Compare tab. The skill can launch it too, but only after the scientist confirms. Either way,
+a deck's comparison slide is fetched from a finished run, never recomputed.
 
 ### Other epigenomic helpers
 
