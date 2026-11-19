@@ -18,6 +18,62 @@ import pandas as pd
 
 LATCH = os.environ.get("LATCH_BIN", "/opt/analysis/bin/latch")
 
+#: Morphology image folders, searched in order; the first that has <short>_fix.* wins.
+IMAGE_ROOTS = ("latch://13502.account/spatials", "latch://atx-illumina.mount/Images")
+
+#: Genome build -> species, for projects whose runs have no slide_metadata.json.
+GENOME_SPECIES = {"hg38": "Homo sapiens", "hg19": "Homo sapiens",
+                  "mm10": "Mus musculus", "mm39": "Mus musculus",
+                  "rn6": "Rattus norvegicus", "rn7": "Rattus norvegicus",
+                  "rn8": "Rattus norvegicus"}
+
+#: slide_metadata.json fields worth showing, by their SLIMS display title. The condition
+#: is usually in "Block experimental condition"; the slide-level field is often empty.
+SLIDE_FIELDS = ("Sample Id", "Block name", "Species", "Organ", "Tissue type", "Disease",
+                "Tissue slide experimental condition", "Block experimental condition",
+                "Workflow", "CT Primary Antibody", "CT Secondary Antibody", "Source",
+                "Comment")
+
+
+def short_run_id(run_id):
+    """RUN1_SEQ001 -> RUN1. Image folders drop the leading zeros (D02778 -> D2778)."""
+    import re
+    head = str(run_id).split("_")[0]
+    m = re.match(r"^([A-Za-z]+)0*(\d+)$", head)
+    return f"{m.group(1)}{int(m.group(2))}" if m else head
+
+
+def parse_slide_metadata(doc: dict) -> dict:
+    """Flatten a fastq2frags `run_metrics/slide_metadata.json` into {title: value}.
+
+    The file holds one SLIMS record per object linked to the run (lysate, NGS libraries,
+    sublibrary, tissue slide). The "Tissue slide" record is the fullest (it alone carries
+    Disease and the CUT&Tag antibodies), so it wins; the others only fill gaps. A field
+    that disagrees between records keeps the tissue-slide value."""
+    def value(col):
+        for k in ("displayValue", "joinedDisplayValue", "displayValues", "value"):
+            v = col.get(k)
+            if v not in (None, "", []):
+                return "; ".join(map(str, v)) if isinstance(v, list) else v
+        return None
+
+    records = []
+    for rec in doc.get("slides", []):
+        flat = {}
+        for col in rec.get("columns", []):
+            title, v = col.get("title") or col.get("name"), value(col)
+            if title and v is not None and title not in flat:
+                flat[title] = v
+        records.append(flat)
+    records.sort(key=lambda r: r.get("Type") != "Tissue slide")
+    out = {"Run Id": doc.get("run_id")}
+    for r in records:
+        for k, v in r.items():
+            out.setdefault(k, v)
+    slide = next((r for r in records if r.get("Type") == "Tissue slide"), None)
+    out["Tissue slide Id"] = slide.get("Id") if slide else None
+    return out
+
 _LS_QUERY = """
 query LDataChildren($argPath: String!) {
   ldataResolvePathData(argPath: $argPath) {
@@ -173,6 +229,127 @@ class Project:
         return ad.read_h5ad(local, backed="r" if backed else None)
 
     # ---------- report tables ----------
+
+    # ---------- samples and metadata ----------
+
+    def slide_metadata(self, run_id: str) -> Optional[dict]:
+        """`fastq2frags/<run_id>/run_metrics/slide_metadata.json`, flattened, or None.
+
+        fastq2frags writes it only when SLIMS has records for the run, and only since
+        2026-11-17, so older runs have none."""
+        folder = f"latch:///fastq2frags/{run_id}/run_metrics"
+        try:
+            if "slide_metadata.json" not in latch_ls(folder):
+                return None
+        except FileNotFoundError:
+            return None
+        import json
+        local = self._cp(f"{folder}/slide_metadata.json",
+                         os.path.join(self.local_root, "metadata", f"{run_id}.json"))
+        with open(local) as fh:
+            return parse_slide_metadata(json.load(fh))
+
+    def image_folder(self, run_id: str) -> Dict[str, Optional[str]]:
+        """Where a run's morphology images are: the first IMAGE_ROOTS folder that exists,
+        and its registered `_fix` image if there is one. H&E images are not tracked."""
+        short = short_run_id(run_id)
+        for root in IMAGE_ROOTS:
+            try:
+                names = latch_ls(f"{root}/{short}")
+            except FileNotFoundError:
+                continue
+            fix = sorted(n for n in names if "_fix" in n and not n.endswith("/"))
+            return {"image_folder": f"{root}/{short}",
+                    "fix_image": f"{root}/{short}/{fix[0]}" if fix else None}
+        return {"image_folder": None, "fix_image": None}
+
+    def sample_table(self, images: bool = True) -> pd.DataFrame:
+        """One row per run: cell count, the project's sample/condition labels, species,
+        slide metadata, and image locations. The first thing to show a scientist.
+
+        `metadata_source` says where the descriptive fields came from:
+        "slide_metadata.json" (SLIMS, newer runs) or "project tables" (obs.csv and the
+        genome in input_parameters.csv). Missing values are left empty for the scientist
+        to fill, never guessed."""
+        obs = pd.read_csv(self.table("obs.csv"), index_col=0)
+        cond_cols = [c for c in obs.columns if c == "condition" or c.startswith("condition_")]
+        genome = None
+        try:
+            ip = pd.read_csv(self.table("input_parameters.csv"))
+            genome = str(ip["genome"].iloc[0]) if "genome" in ip else None
+        except Exception:
+            pass
+        rows = []
+        for run, sub in obs.groupby("sample", sort=True):
+            row = {"run_id": run, "n_cells": len(sub)}
+            if "SampleName" in sub:
+                row["sample_name"] = "; ".join(map(str, sub["SampleName"].unique()))
+            for c in cond_cols:
+                row[c] = "; ".join(map(str, sub[c].unique()))
+            row["genome"] = genome
+            meta = self.slide_metadata(run)
+            if meta:
+                row["metadata_source"] = "slide_metadata.json"
+                row["Tissue slide Id"] = meta.get("Tissue slide Id")
+                for f in SLIDE_FIELDS:
+                    row[f] = meta.get(f)
+            else:
+                row["metadata_source"] = "project tables"
+                row["Species"] = GENOME_SPECIES.get(genome or "")
+            if images:
+                row.update(self.image_folder(run))
+            rows.append(row)
+        df = pd.DataFrame(rows)
+        return df.dropna(axis=1, how="all")
+
+    def ranked_genes(self, level: str = "cluster") -> pd.DataFrame:
+        """`tables/ranked_genes_per_<level>.csv`: every gene, each group against all other
+        cells (ArchR getMarkerFeatures on the GeneScoreMatrix). Columns: group_name, name,
+        Log2FC, MeanDiff, FDR, Pval. For `condition`, the file may be named
+        `_condition_1` or `_conditions1` (see Plots' resolve_heatmap_stats_table)."""
+        names = {"cluster": ["ranked_genes_per_cluster.csv"],
+                 "sample": ["ranked_genes_per_sample.csv"],
+                 "condition": ["ranked_genes_per_condition.csv",
+                               "ranked_genes_per_condition_1.csv",
+                               "ranked_genes_per_conditions1.csv"]}[level]
+        present = set(latch_ls(f"{self.latch_root}/tables"))
+        for n in names:
+            if n in present:
+                return pd.read_csv(self.table(n))
+        raise FileNotFoundError(f"no ranked_genes table for {level} (tried {', '.join(names)})")
+
+    def top_ranked_genes(self, level: str = "cluster", n: int = 10, fdr: float = 0.05,
+                         sort_by: str = "FDR", groups: Optional[List[str]] = None):
+        """The top `n` genes higher in each group than in all other cells: FDR <= `fdr`
+        and Log2FC > 0, ranked by `sort_by` (FDR ascending, or Log2FC / MeanDiff
+        descending).
+
+        FDR is the default because it gave the most interpretable lists on Kehrl_713
+        (C7: Prkch, Lef1, Bcl11b, Tcf7, a T-cell cluster). Ranking by Log2FC puts genes
+        with almost no gene score (Gm*, Mir*; MeanDiff 0.03-0.06) on top, and ranking by
+        MeanDiff favours long genes (Csmd1, Dmd, Lrp1b) that collect gene score by size.
+        Treat any list as candidates for the scientist, not as cell-type calls.
+
+        Returns (table, rule). Quote the rule with any list you show: ArchR
+        getMarkerFeatures on the GeneScoreMatrix, t-test, bias TSSEnrichment +
+        log10(nFrags), each group against all other cells (archrproject/wf/archr_objs.R).
+        That is a one-vs-rest marker ranking, not a pairwise comparison; for A vs B use
+        compare clusters (atx_compare)."""
+        if sort_by not in ("FDR", "Log2FC", "MeanDiff"):
+            raise ValueError("sort_by must be FDR, Log2FC or MeanDiff")
+        df = self.ranked_genes(level)
+        df["group_name"] = df["group_name"].astype(str)
+        if groups is not None:
+            df = df[df["group_name"].isin([str(g) for g in groups])]
+        sig = df[(df["FDR"] <= fdr) & (df["Log2FC"] > 0)]
+        top = (sig.sort_values(["group_name", sort_by], ascending=[True, sort_by == "FDR"])
+                  .groupby("group_name", sort=False).head(n)
+                  [["group_name", "name", "Log2FC", "MeanDiff", "FDR"]]
+                  .reset_index(drop=True))
+        rule = (f"ranked_genes_per_{level}: ArchR getMarkerFeatures, GeneScoreMatrix, t-test, "
+                f"bias TSSEnrichment + log10(nFrags), each {level} vs all other cells; "
+                f"FDR <= {fdr}, Log2FC > 0, top {n} by {sort_by}")
+        return top, rule
 
     def peak_call_summary(self, level: str = "cluster") -> pd.DataFrame:
         """Tidy the ArchR peak-call summary behind the 'Peaks per Cluster/Sample' charts.

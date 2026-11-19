@@ -7,19 +7,27 @@ them into a branded PowerPoint deck.
 ## Layout
 
 ```
-SKILL.md                      the skill itself (instructions + triggering description)
+SKILL.md                      the skill: role, the conversation, the four parts of a report
+scripts/atx_project.py        Latch project -> table-first data access; sample table and
+                              slide metadata; ranked marker genes
 scripts/atx_plots_lib.py      GUI-free plotting functions lifted from atlasxomics/plots_epigenome
-scripts/atx_project.py        Latch project -> table-first data access
 scripts/atx_figures.py        one generator per report figure
+scripts/render_figures.py     renders every figure a report needs, in one pass on the box
 scripts/atx_compare.py        differential analysis: fetch, check and plot compare clusters runs;
                               launch a new one after the scientist confirms
 scripts/atx_deck.py           PowerPoint assembly (runs locally, not on the box)
+scripts/build_demo_deck.py    the Demo_001 deck, as a worked example of atx_deck
+scripts/validate_selftest.py  checks that every deck validation rule fires on a planted fault
+scripts/cleanup.py            end-of-session cleanup of the box's scratch and cache
 references/figure_catalog.md  provenance of every figure, measured geometry, QC column rules
+references/figures.md         per-figure detail: the four checks, marker genes, track browser,
+                              differential motif slide, motif logos
+references/differential_analysis.md   how compare clusters computes differential genes/peaks/motifs
 references/pipeline.md        the ATX processing pipeline (epigenomics in depth; WT and co-profiling in brief)
 references/deck.md            deck assembly: template, slide structures, validation, layout traps
-references/differential_analysis.md   how compare clusters computes differential genes/peaks/motifs
-references/comparison_Demo_001.md   regenerated vs delivered, panel by panel
+references/validation_notes.md   regenerated vs delivered: what reproduces and what cannot
 assets/atx_template.pptx      branded template: a delivered deck with its slides stripped
+assets/bioinformatics_workflow.png   the workflow diagram slide
 ```
 
 ## Prerequisites

@@ -12,7 +12,7 @@ dies on figure 3 wastes the twenty minutes already spent.
 
 THE CONFIG BLOCK IS NOT BOILERPLATE. The marker genes, the motifs and the Compare run are
 per-project scientific choices. Confirm them with whoever ordered the report before
-rendering; see "Choosing features for gene/motif panels" in SKILL.md.
+rendering; see "Choosing features for gene/motif panels" (Part 3) in SKILL.md.
 """
 import json
 import os
@@ -106,9 +106,15 @@ def _nb():
         f"{PROJ}__neighborhood_grid.png", scale=2)
 guard("neighborhood_grid", _nb)
 
-guard("cluster_proportion", lambda: emit(
-    F.cluster_proportion(cells, color_map=CM, group_labels=labels, font_pt=16)[0],
-    "cluster_proportion", 820, 640))
+# A proportion bar compares samples; with one sample it is a single bar that says nothing.
+if len(samples) > 1:
+    guard("cluster_proportion", lambda: emit(
+        F.cluster_proportion(cells, color_map=CM, group_labels=labels, font_pt=16)[0],
+        "cluster_proportion", 820, 640))
+else:
+    report["figures"]["cluster_proportion"] = {
+        "status": "SKIPPED", "reason": "single-sample project: nothing to compare"}
+    print("SKIP cluster_proportion: single-sample project")
 
 # --- slides 4-6: one morphology overlay per run (cropped to the tixels) ---------------
 def _morph():
@@ -257,5 +263,7 @@ with open("render_report.json", "w") as f:
     json.dump(report, f, indent=1, default=str)
 
 failed = [k for k, v in report["figures"].items() if v.get("status") == "FAIL"]
-print(f"\n{len(report['figures']) - len(failed)} ok, {len(failed)} failed"
-      + (f": {failed}" if failed else ""))
+skipped = [k for k, v in report["figures"].items() if v.get("status") == "SKIPPED"]
+print(f"\n{len(report['figures']) - len(failed) - len(skipped)} ok, {len(failed)} failed"
+      + (f": {failed}" if failed else "")
+      + (f", {len(skipped)} skipped: {skipped}" if skipped else ""))

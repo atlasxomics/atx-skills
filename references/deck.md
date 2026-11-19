@@ -110,6 +110,8 @@ produce. Both are built with `_place_columns()`, which takes explicit column gro
 - **Neighborhood slide** — left column: the per-sample heatmaps as one figure on a shared
   colour axis, from `atx_figures.neighborhood_grid()`. Right column: the cluster-proportion
   bar. Stacking the heatmaps in a deck column instead shrinks each one to unreadable.
+  A single-sample project has no proportion bar (`render_figures.py` skips it): give the
+  one heatmap the whole slide.
 
 ### Visual review is not optional
 

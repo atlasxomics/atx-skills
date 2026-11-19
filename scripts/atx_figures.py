@@ -334,15 +334,7 @@ class MorphologyImageMissing(FileNotFoundError):
     """Raised when a run has no *_fix image. Report this to the scientist."""
 
 
-def short_run_id(run_id):
-    """RUN1_SEQ001 -> RUN1. Image folders drop the leading zeros (D02778 -> D2778)."""
-    head = str(run_id).split("_")[0]
-    m = _re.match(r"^([A-Za-z]+)0*(\d+)$", head)
-    return f"{m.group(1)}{int(m.group(2))}" if m else head
-
-
-#: Searched in order; the first that has <short>_fix.* wins.
-IMAGE_ROOTS = ("latch://13502.account/spatials", "latch://atx-illumina.mount/Images")
+from atx_project import IMAGE_ROOTS, short_run_id  # noqa: E402  (re-exported)
 
 
 def fetch_morphology_image(project, run_id, roots=IMAGE_ROOTS):
