@@ -77,7 +77,7 @@ STANDARD_ONLY = {
     "compare_column": None,
     "compare_mapping": None,
     "compare_groups": [],
-    "colors": None,                 # no pinned palette: use the H5 default
+    "colors": None,                 # pinned below: H5 default in the viewer's order
 }
 p = Project(PROJ, cache="/data/analysis_cache")
 assumptions = []
@@ -100,13 +100,27 @@ if not cfg.get("genome"):
     cfg["genome"] = str(p.input_parameters()["genome"])
 if cfg.get("logo_genome") is None:
     cfg["logo_genome"] = F.LOGO_GENOME.get(cfg["genome"], "mm10")
-CM = getattr(F, cfg["colors"]) if cfg.get("colors") else None
+# One palette for every figure. A named palette (e.g. "DEMO_CLUSTER_COLORS") or an
+# explicit {cluster: hex} dict from a JSON config wins; otherwise pin the H5 default in
+# the viewer's order. Never leave this None: the generators' own defaults disagree with
+# each other, so an unpinned run colours the same cluster differently on different slides.
+_colors = cfg.get("colors")
+if isinstance(_colors, str):
+    CM = getattr(F, _colors)
+elif isinstance(_colors, dict):
+    CM = dict(_colors)
+else:
+    CM = F.default_cluster_colors(cells.obs["cluster"].astype(str).unique())
+_missing = sorted(set(cells.obs["cluster"].astype(str)) - set(CM))
+if _missing:
+    raise KeyError(f"palette has no colour for clusters {_missing}")
 samples = F.natural_sort(cells.obs["sample"].unique().tolist())
 labels = F.deck_panel_labels(cells, samples)
 
 report = {"project": PROJ, "n_obs": int(cells.n_obs), "samples": samples,
           "panel_labels": labels, "figures": {}, "notes": [],
           "config": {k: v for k, v in cfg.items() if k != "assumptions"},
+          "palette": {c: CM[c] for c in F.natural_sort(CM)},
           "assumptions": assumptions}
 
 

@@ -34,7 +34,7 @@ def qc_violin(adata, metric: str, group_by: str = "SampleName",
     color_map = L.build_discrete_color_map(categories, L.DEFAULT_H5_CATEGORICAL_PALETTE)
 
     kwargs = dict(x="group", y="value", points=False, color="group",
-                  color_discrete_map=cmap, category_orders={"group": categories})
+                  color_discrete_map=color_map, category_orders={"group": categories})
     if plot_type == "violin":
         fig = px.violin(df, box=True, **kwargs)
     elif plot_type == "box":
@@ -664,6 +664,23 @@ def ordered_palette(color_map, categories):
     if missing:
         raise KeyError(f"no colour supplied for {missing}")
     return [color_map[c] for c in cats]
+
+
+def default_cluster_colors(categories, palette=None):
+    """One pinned {category: colour} map for a project with no palette of its own.
+
+    Left to their own defaults the generators disagree: `cluster_maps` assigns the H5
+    palette in lexicographic label order (C1, C10, C11, ... C2, as `plot_umap_for_samples`
+    does), `umap_overview` and `cluster_proportion` assign it in numeric order, and
+    `morphology_overlay` uses matplotlib's "bright" cycle. The same cluster then changes
+    colour between slides (four checks, #4), and from 10 clusters up even the plotly
+    panels disagree with each other. Building the map once, in the lexicographic order the
+    Plots viewer uses, and passing it to every `color_map=` keeps one cluster one colour
+    across the deck and matches the viewer the customer opens.
+    """
+    pal = list(palette or H5_PALETTE)
+    cats = sorted(str(c) for c in categories)          # the viewer's assignment order
+    return {c: pal[i % len(pal)] for i, c in enumerate(cats)}
 
 
 def natural_sort(values):
