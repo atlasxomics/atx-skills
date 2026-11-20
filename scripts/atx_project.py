@@ -324,7 +324,7 @@ class Project:
         and Log2FC > 0, ranked by `sort_by` (FDR ascending, or Log2FC / MeanDiff
         descending).
 
-        FDR is the default because it gave the most interpretable lists on Kehrl_713
+        FDR is the default because it gave the most interpretable lists on 'a test'
         (C7: Prkch, Lef1, Bcl11b, Tcf7, a T-cell cluster). Ranking by Log2FC puts genes
         with almost no gene score (Gm*, Mir*; MeanDiff 0.03-0.06) on top, and ranking by
         MeanDiff favours long genes (Csmd1, Dmd, Lrp1b) that collect gene score by size.
