@@ -69,12 +69,115 @@ def qc_violin_panels(project, metrics: Optional[List[str]] = None,
     return out
 
 
+# ------------------------------------------------------ shared spatial scale
+
+def chip_geometry(project, run_id):
+    """The chip a run was captured on, from AtlasXBrowser's spatial/metadata.json.
+
+    The spatial coordinates are AtlasXBrowser crop-space pixels, and the crop spans the
+    whole capture area (~7,800 px) whatever the chip. Equal pixel spans therefore mean
+    equal physical spans only between runs on the same chip type.
+    """
+    import json
+    short = short_run_id(run_id)
+    path = project._cp(f"latch://13502.account/spatials/{short}/spatial/metadata.json",
+                       os.path.join(project.local_root, "spatial", f"{short}_metadata.json"))
+    md = json.load(open(path))
+    crop = md.get("crop_area") or [None] * 4
+    return {"numChannels": md.get("numChannels"),
+            "barcode_filename": md.get("barcode_filename"),
+            "chip_resolution": md.get("chip_resolution"),
+            "crop_px": (crop[2] - crop[0]) if None not in crop else None}
+
+
+def check_shared_scale(project, samples, crop_tol=0.05):
+    """Can these runs be drawn on one physical scale? Returns (ok, {run: geometry}).
+
+    True when every run has the same channel count, barcode set and recorded chip
+    resolution, and capture-area widths within `crop_tol` of each other. A single sample
+    is trivially True. When False, draw each panel at its own scale and say so.
+    """
+    geoms = {str(s): chip_geometry(project, s) for s in samples}
+    if len(geoms) < 2:
+        return True, geoms
+    keys = {(g["numChannels"], g["barcode_filename"], g["chip_resolution"])
+            for g in geoms.values()}
+    crops = [g["crop_px"] for g in geoms.values()]
+    crop_ok = None not in crops and (max(crops) - min(crops)) <= crop_tol * float(np.median(crops))
+    return (len(keys) == 1 and crop_ok), geoms
+
+
+def shared_spatial_scale(fig, axes=None, pad=0.04):
+    """Put every spatial subplot of `fig` on the same physical scale.
+
+    Plotly fits each subplot's range to its own data, so a 0.5 mm2 section fills its panel
+    exactly as a 5.7 mm2 one does and the reader cannot tell which tissue is small. This
+    gives every subplot the same x span and the same y span (the largest tissue's, padded
+    by `pad` per side), each centred on its own tissue. With equal subplot domains the
+    panels then share one pixels-per-unit scale; `panel_scales()` confirms it.
+
+    `axes` limits it to some x axes (e.g. ["x", "x2"]) when the figure also holds a
+    non-spatial panel such as a UMAP. Returns the spans used and each panel's extent.
+    """
+    pts = {}
+    for tr in fig.data:
+        xa, ya = (getattr(tr, "xaxis", None) or "x"), (getattr(tr, "yaxis", None) or "y")
+        if axes is not None and xa not in axes:
+            continue
+        if tr.x is None or tr.y is None:
+            continue
+        try:
+            x = np.asarray(tr.x, dtype=float); y = np.asarray(tr.y, dtype=float)
+        except (TypeError, ValueError):
+            continue
+        ok = np.isfinite(x) & np.isfinite(y)
+        if ok.any():
+            pts.setdefault((xa, ya), []).append(np.c_[x[ok], y[ok]])
+    boxes = {k: np.vstack(v) for k, v in pts.items()}
+    if len(boxes) < 2:
+        return {"span": None, "panels": {}}
+    sx = max(np.ptp(b[:, 0]) for b in boxes.values()) * (1 + 2 * pad)
+    sy = max(np.ptp(b[:, 1]) for b in boxes.values()) * (1 + 2 * pad)
+    panels = {}
+    for (xa, ya), b in boxes.items():
+        cx = (b[:, 0].min() + b[:, 0].max()) / 2
+        cy = (b[:, 1].min() + b[:, 1].max()) / 2
+        fig.layout["xaxis" + xa[1:]].update(range=[cx - sx / 2, cx + sx / 2], autorange=False)
+        fig.layout["yaxis" + ya[1:]].update(range=[cy - sy / 2, cy + sy / 2], autorange=False)
+        panels[xa] = {"x_extent": float(np.ptp(b[:, 0])), "y_extent": float(np.ptp(b[:, 1]))}
+    return {"span": [float(sx), float(sy)], "panels": panels}
+
+
+def panel_scales(fig, axes=None):
+    """Rendered pixels per coordinate unit, (x, y), for each subplot, from plotly's final
+    layout. Set the figure's width and height first. Equal values across the spatial
+    panels are the proof that `shared_spatial_scale` held after aspect constraints."""
+    full = fig.full_figure_for_development(warn=False)
+    L_ = full.layout
+    pw = L_.width - L_.margin.l - L_.margin.r
+    ph = L_.height - L_.margin.t - L_.margin.b
+    out = {}
+    for k in L_:
+        if not k.startswith("xaxis"):
+            continue
+        xa = "x" + k[5:]
+        if axes is not None and xa not in axes:
+            continue
+        xax, yax = L_[k], L_["yaxis" + k[5:]]
+        if xax.range is None or yax.range is None or xax.domain is None:
+            continue
+        out[xa] = (round(pw * (xax.domain[1] - xax.domain[0]) / (xax.range[1] - xax.range[0]), 5),
+                   round(ph * (yax.domain[1] - yax.domain[0]) / (yax.range[1] - yax.range[0]), 5))
+    return out
+
+
 # ---------------------------------------------------------------- cluster maps
 
 def cluster_maps(adata, samples=None, color_by="cluster", pt_size=3,
                  coords="spatial", flipY=True, color_scheme="bright",
                  vmin=None, vmax=None, palette="h5", color_map=None,
-                 panel_labels=None, legend_header=False, equal_aspect=True):
+                 panel_labels=None, legend_header=False, equal_aspect=True,
+                 shared_scale=True):
     """Spatial maps per sample (catalog #1) or spatial QC maps (catalog #10).
 
     Thin wrapper over plots_epigenome's `plot_umap_for_samples`. Pass color_by="cluster"
@@ -84,6 +187,12 @@ def cluster_maps(adata, samples=None, color_by="cluster", pt_size=3,
     NOTE: the delivered panels were rendered by Latch's proprietary w_h5 widget (the
     `Mean: x` / `Genes: y` colorbar annotation). This reproduces the same data with Plotly
     cosmetics; it is not a pixel match and cannot be.
+
+    `shared_scale=True` (the default) draws every sample at the same physical scale, so a
+    small section looks small (see `shared_spatial_scale`). It is only correct when the runs
+    share a chip type; `render_figures.py` checks that with `check_shared_scale()` and
+    passes `shared_scale=False` when they do not. Check it the same way when calling this
+    directly on a project with mixed chips.
     """
     if samples is None:
         samples = L.sort_group_categories(adata.obs["sample"].unique().tolist())
@@ -117,6 +226,8 @@ def cluster_maps(adata, samples=None, color_by="cluster", pt_size=3,
             lambda ax: ax.update(scaleanchor=(ax.anchor if ax.anchor and
                                               ax.anchor != "free" else "x"),
                                  scaleratio=1))
+    if shared_scale and len(list(samples)) > 1:
+        shared_spatial_scale(fig)
     if panel_labels:
         relabel_panels(fig, {str(k): v for k, v in panel_labels.items()})
     if legend_header:
@@ -674,9 +785,11 @@ def default_cluster_colors(categories, palette=None):
     does), `umap_overview` and `cluster_proportion` assign it in numeric order, and
     `morphology_overlay` uses matplotlib's "bright" cycle. The same cluster then changes
     colour between slides (four checks, #4), and from 10 clusters up even the plotly
-    panels disagree with each other. Building the map once, in the lexicographic order the
-    Plots viewer uses, and passing it to every `color_map=` keeps one cluster one colour
-    across the deck and matches the viewer the customer opens.
+    panels disagree with each other. Building the map once, in the lexicographic order
+    `plot_umap_for_samples` uses, and passing it to every `color_map=` keeps one cluster
+    one colour across the deck. It reproduces the Plots code's own assignment; the Latch
+    H5 viewer's order is not stored anywhere, so it can still differ from what the customer
+    sees there (references/figures.md, check 4).
     """
     pal = list(palette or H5_PALETTE)
     cats = sorted(str(c) for c in categories)          # the viewer's assignment order
@@ -1113,7 +1226,8 @@ def feature_umap(adata, feature, colorscale=FEATURE_COLORSCALE, point_size=2.0,
 
 def gene_activity_block(adata, feature, samples=None, sample_labels=None,
                         row_label=None, colorscale=FEATURE_COLORSCALE, pt_size=2.6,
-                        umap_point_size=1.8, panel_w=240, height=300):
+                        umap_point_size=1.8, panel_w=240, height=300,
+                        equal_aspect=True, shared_scale=True):
     """One marker gene as spatial panels per sample PLUS a UMAP, on a shared colour scale.
 
     This is the unit the delivered gene-activity slide is built from; four of them tile
@@ -1122,7 +1236,9 @@ def gene_activity_block(adata, feature, samples=None, sample_labels=None,
     condition (CondA, CondB, CondC) rather than by run id, which is what that slide uses.
 
     Spatial coordinates come from `obsm["spatial_img"]` when present, so the panels keep
-    the brightfield orientation used everywhere else in the deck.
+    the brightfield orientation used everywhere else in the deck. The spatial panels are
+    isotropic (`equal_aspect`) and on one physical scale (`shared_scale`, same caveat as
+    `cluster_maps`: only for runs on the same chip type); the UMAP panel is left free.
     """
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -1166,6 +1282,12 @@ def gene_activity_block(adata, feature, samples=None, sample_labels=None,
                                                 font=dict(size=7), side="bottom"))))
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False, scaleanchor=None)
+    spatial_axes = ["x" if i == 1 else f"x{i}" for i in range(1, len(samples) + 1)]
+    if equal_aspect:
+        for xa in spatial_axes:
+            fig.layout["yaxis" + xa[1:]].update(scaleanchor=xa, scaleratio=1)
+    if shared_scale and len(samples) > 1:
+        shared_spatial_scale(fig, axes=spatial_axes)
     for a in fig.layout.annotations:
         a.font.size = 11
     if row_label:

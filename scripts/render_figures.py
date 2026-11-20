@@ -149,6 +149,23 @@ def emit(fig, name, w, h, scale=2):
     fig.write_image(f"{PROJ}__{name}.png", scale=scale)
 
 
+def emit_spatial(fig, name, w, h, axes=None):
+    """emit() for a per-sample spatial figure, recording the rendered scale of each panel.
+
+    With SHARED_SCALE on, every spatial panel must come out at the same pixels per unit;
+    a spread over 1% means the shared range did not survive layout, and the figure is
+    failed rather than shipped with one section silently enlarged.
+    """
+    emit(fig, name, w, h)
+    if not (SHARED_SCALE and len(samples) > 1):
+        return
+    sc = F.panel_scales(fig, axes=axes)
+    report.setdefault("panel_scales", {})[name] = sc
+    xs = [v[0] for v in sc.values()]
+    if len(xs) > 1 and (max(xs) - min(xs)) > 0.01 * max(xs):
+        raise RuntimeError(f"{name}: spatial panels rendered at different scales {sc}")
+
+
 # --- the sample table: the deck's first slide, and what the scientist checks first -----
 def _samples():
     t = p.sample_table()
@@ -160,11 +177,23 @@ guard("samples", _samples)   # records itself under "sample_table"
 # --- orientation first: every spatial panel below is drawn in the image frame ----------
 report["alignment"] = F.align_spatial_to_image(p, cells, samples)
 
+# --- one physical scale: a small section must look small ------------------------------
+# Every spatial panel shares one span so relative tissue size is true. Only valid when the
+# runs are on the same chip type (the coordinates are crop-space pixels, ~7,800 px across
+# any chip); otherwise each panel keeps its own scale and the report says so.
+SHARED_SCALE, report["chip_geometry"] = F.check_shared_scale(p, samples)
+report["shared_scale"] = SHARED_SCALE
+if len(samples) > 1 and not SHARED_SCALE:
+    report["notes"].append("runs are on different chip types: spatial panels are drawn "
+                           "at per-panel scale, so relative tissue size is NOT comparable")
+    print("NOTE chip geometry differs between runs: per-panel spatial scale")
+
 # --- slide 2: spatial clusters + two UMAPs --------------------------------------------
-guard("cluster_spatial_h5", lambda: emit(
+guard("cluster_spatial_h5", lambda: emit_spatial(
     F.cluster_maps(cells, samples=samples, color_by="cluster", color_map=CM,
                    coords="spatial_img", flipY=False, panel_labels=labels,
-                   legend_header=True)[0], "cluster_spatial_h5", 1150, 640))
+                   legend_header=True, shared_scale=SHARED_SCALE)[0],
+    "cluster_spatial_h5", 1150, 640))
 
 guard("umap_cluster", lambda: emit(
     F.umap_overview(cells, color_by="cluster", color_map=CM,
@@ -259,7 +288,8 @@ def _genes():
         fig, info = F.gene_activity_block(cells2, g, samples=samples,
                                           sample_labels=labels,
                                           row_label=cfg["gene_rows"].get(g, g),
-                                          panel_w=250, height=420)
+                                          panel_w=250, height=420,
+                                          shared_scale=SHARED_SCALE)
         fig.write_image(f"{PROJ}__block_{g}.png", scale=2)
         report["figures"][f"block_{g}"] = {"png": f"{PROJ}__block_{g}.png",
                                            "mean": info.get("mean")}
@@ -293,10 +323,11 @@ def _motifs():
                                         mapping=cfg["compare_mapping"])
     report["notes"].append(f"compare groups: {counts}")
 
-    emit(F.cluster_maps(cells3, samples=samples, color_by=cfg["compare_column"],
-                        coords="spatial_img", flipY=False, panel_labels=labels,
-                        color_map=None, palette=None)[0],
-         "cd19_high_spatial", 720, 520)
+    emit_spatial(F.cluster_maps(cells3, samples=samples, color_by=cfg["compare_column"],
+                                coords="spatial_img", flipY=False, panel_labels=labels,
+                                color_map=None, palette=None,
+                                shared_scale=SHARED_SCALE)[0],
+                 "cd19_high_spatial", 720, 520)
 
     sub = F.subset_to_groups(cells3, cfg["compare_column"], cfg["compare_groups"])
     sub, missing = F.add_features(p, sub, cfg["motifs"], kind="motifs")
@@ -305,10 +336,10 @@ def _motifs():
     for m in cfg["motifs"]:
         if m in missing:
             continue
-        emit(F.cluster_maps(sub, samples=samples, color_by=m, coords="spatial_img",
-                            flipY=False, palette=None,
-                            panel_labels=labels)[0],
-             f"motif_sel_{m}", 620, 470)
+        emit_spatial(F.cluster_maps(sub, samples=samples, color_by=m, coords="spatial_img",
+                                    flipY=False, palette=None, panel_labels=labels,
+                                    shared_scale=SHARED_SCALE)[0],
+                     f"motif_sel_{m}", 620, 470)
         emit(F.feature_violin(sub, m, cfg["compare_column"],
                               order=cfg["compare_groups"][::-1])[0],
              f"motif_violin_{m}", 520, 430)
@@ -333,9 +364,10 @@ def _qc():
     qc.to_csv(f"qc_table_{PROJ}.csv", index=False)
     report["figures"]["qc_table"] = {"csv": f"qc_table_{PROJ}.csv", "rows": int(len(qc))}
     for m in ("TSSEnrichment", "log10_nFrags"):
-        emit(F.cluster_maps(cells, samples=samples, color_by=m, coords="spatial_img",
-                            flipY=False, palette=None, panel_labels=labels)[0],
-             f"qc_spatial_{m}", 1150, 620)
+        emit_spatial(F.cluster_maps(cells, samples=samples, color_by=m, coords="spatial_img",
+                                    flipY=False, palette=None, panel_labels=labels,
+                                    shared_scale=SHARED_SCALE)[0],
+                     f"qc_spatial_{m}", 1150, 620)
         print(f"OK   qc_spatial_{m}")
 guard("qc", _qc)
 

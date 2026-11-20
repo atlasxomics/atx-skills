@@ -97,6 +97,34 @@ For a project with no delivered deck to sample, the figures will be palette-cons
 but assigned differently from whatever the viewer would have chosen. Tell the scientist
 that up front — it is not something to discover during a customer review.
 
+## Spatial panels share one physical scale
+
+Not one of the four checks, because the figure rarely looks wrong: each sample's panel is
+fitted to its own tissue, so every section fills its box. On a project whose sections
+differed tenfold in area (0.47, 4.4 and 5.7 mm² by H&E) the smallest was drawn the same size
+as the largest, and the zoom spread its tixels into what looked like a sparse grid across a
+full-size section.
+
+`shared_spatial_scale(fig, axes=None, pad=0.04)` fixes the ranges after the figure is
+built: one x span and one y span for every spatial subplot (the largest extent, padded),
+each centred on its own tissue. With equal subplot domains, that means one
+pixels-per-unit scale; `panel_scales(fig)` reads plotly's final layout and returns it per
+panel, so the claim is checked rather than assumed. Pass `axes=` when the figure also holds
+a UMAP, as `gene_activity_block` does.
+
+Only for runs on the same chip type. The spatial coordinates are crop-space pixels and the
+crop covers the whole capture area (~7,800 px) for any chip, so a 50-channel and a
+220-channel run would be drawn at the same pixel span for very different physical sizes.
+`check_shared_scale()` compares `numChannels`, `barcode_filename` and `chip_resolution`
+from each run's `spatials/<SHORT_ID>/spatial/metadata.json`, and capture widths within 5%.
+`chip_resolution` is often null, so no absolute scale bar is drawn; the relative scale is
+exact.
+
+Sanity check against H&E when sizes are disputed: measure each section against its own
+scale bar (the H&E images are frequently at different magnifications) and compare the
+area ratios with the on-tissue tixel counts. In the case above the two larger sections
+agreed to 2% and the smallest, a lacy fragment, to about 20%.
+
 ## Marker genes: always pair the spatial panels with a UMAP
 
 **When building a deck from scratch, show each marker gene as its spatial panels AND a
