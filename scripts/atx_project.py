@@ -232,6 +232,10 @@ class Project:
 
     # ---------- samples and metadata ----------
 
+    def input_parameters(self) -> dict:
+        """The one-row tables/input_parameters.csv as a dict (genome, tile size, ...)."""
+        return pd.read_csv(self.table("input_parameters.csv")).iloc[0].to_dict()
+
     def slide_metadata(self, run_id: str) -> Optional[dict]:
         """`fastq2frags/<run_id>/run_metrics/slide_metadata.json`, flattened, or None.
 

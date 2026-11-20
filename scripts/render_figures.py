@@ -5,6 +5,8 @@ figures that already exist, and this produces them. Run it on the analysis box (
 `/data/analysis_cache` and the Latch CLI), then run the deck builder.
 
     python render_figures.py Demo_001
+    python render_figures.py <project> --one-shot             # pick features from the data
+    python render_figures.py <project> --config features.json  # features chosen elsewhere
 
 Every figure is produced under `guard()`, so one failure is reported in
 `render_report.json` rather than taking the run down with it -- a 25-figure render that
@@ -12,8 +14,14 @@ dies on figure 3 wastes the twenty minutes already spent.
 
 THE CONFIG BLOCK IS NOT BOILERPLATE. The marker genes, the motifs and the Compare run are
 per-project scientific choices. Confirm them with whoever ordered the report before
-rendering; see "Choosing features for gene/motif panels" (Part 3) in SKILL.md.
+rendering; see "Choosing features for gene/motif panels" (Part 3) in SKILL.md. The
+exception is a one-shot report, where the scientist has asked for best assumptions
+instead of confirmations: `--config` takes a JSON file with the same keys (what you
+chose for the tissue), and `--one-shot` without it picks marker genes from the data
+(`atx_figures.auto_feature_config`). Either way the choices are written to
+`render_report.json` under "assumptions" for the deck to print.
 """
+import argparse
 import json
 import os
 import sys
@@ -25,7 +33,13 @@ matplotlib.use("Agg")
 import atx_figures as F
 from atx_project import Project
 
-PROJ = sys.argv[1] if len(sys.argv) > 1 else "Demo_001"
+_ap = argparse.ArgumentParser()
+_ap.add_argument("project", nargs="?", default="Demo_001")
+_ap.add_argument("--one-shot", action="store_true",
+                 help="no CONFIG entry needed: choose marker genes from the data")
+_ap.add_argument("--config", help="JSON file of feature choices (CONFIG keys)")
+ARGS = _ap.parse_args()
+PROJ = ARGS.project
 
 CONFIG = {
     "Demo_001": {
@@ -55,7 +69,7 @@ CONFIG = {
 #: DO NOT add real project, customer or run names to this file. It is published.
 STANDARD_ONLY = {
     "genome": None,                 # taken from the project's input_parameters.csv
-    "logo_genome": "mm10",          # no CisBP seqlogo file ships for mm39
+    "logo_genome": None,            # from the genome via atx_figures.LOGO_GENOME
     "genes": [],
     "gene_rows": {},
     "motifs": [],
@@ -65,24 +79,35 @@ STANDARD_ONLY = {
     "compare_groups": [],
     "colors": None,                 # no pinned palette: use the H5 default
 }
-cfg = CONFIG.get(PROJ)
-if cfg is None:
+p = Project(PROJ, cache="/data/analysis_cache")
+assumptions = []
+if ARGS.config:
+    with open(ARGS.config) as fh:
+        cfg = {**STANDARD_ONLY, **json.load(fh)}
+    assumptions = list(cfg.pop("assumptions", []))
+else:
+    cfg = CONFIG.get(PROJ)
+cells = p.cell_adata()
+if cfg is None and ARGS.one_shot:
+    cfg, assumptions = F.auto_feature_config(p, cells)
+    print(f"One-shot: marker genes chosen from the data: {cfg['genes']}")
+elif cfg is None:
     cfg = dict(STANDARD_ONLY)
     print(f"No feature configuration for {PROJ!r}: rendering the standard figures only. "
           "Gene-activity, coverage-track and differential-motif panels are skipped until "
           "marker genes, motifs and a comparison are agreed with the scientist.")
-
-p = Project(PROJ, cache="/data/analysis_cache")
 if not cfg.get("genome"):
-    import pandas as _pd
-    cfg["genome"] = str(_pd.read_csv(p.table("input_parameters.csv"))["genome"].iloc[0])
-cells = p.cell_adata()
+    cfg["genome"] = str(p.input_parameters()["genome"])
+if cfg.get("logo_genome") is None:
+    cfg["logo_genome"] = F.LOGO_GENOME.get(cfg["genome"], "mm10")
 CM = getattr(F, cfg["colors"]) if cfg.get("colors") else None
 samples = F.natural_sort(cells.obs["sample"].unique().tolist())
 labels = F.deck_panel_labels(cells, samples)
 
 report = {"project": PROJ, "n_obs": int(cells.n_obs), "samples": samples,
-          "panel_labels": labels, "figures": {}, "notes": []}
+          "panel_labels": labels, "figures": {}, "notes": [],
+          "config": {k: v for k, v in cfg.items() if k != "assumptions"},
+          "assumptions": assumptions}
 
 
 def guard(name, fn):
@@ -109,6 +134,14 @@ def emit(fig, name, w, h, scale=2):
     fig.update_layout(width=w, height=h)
     fig.write_image(f"{PROJ}__{name}.png", scale=scale)
 
+
+# --- the sample table: the deck's first slide, and what the scientist checks first -----
+def _samples():
+    t = p.sample_table()
+    t.to_csv(f"samples_{PROJ}.csv", index=False)
+    report["figures"]["sample_table"] = {"csv": f"samples_{PROJ}.csv", "rows": int(len(t))}
+    print(f"OK   sample_table  {len(t)} runs")
+guard("samples", _samples)   # records itself under "sample_table"
 
 # --- orientation first: every spatial panel below is drawn in the image frame ----------
 report["alignment"] = F.align_spatial_to_image(p, cells, samples)

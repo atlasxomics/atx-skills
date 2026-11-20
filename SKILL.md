@@ -99,12 +99,54 @@ It will usually open with something like "Can you make me a data report for
       With a single sample, drop the proportion plot and adjust accordingly.
    3. **H&E**: if the scientist has not provided an H&E image, ask whether one exists and
       where. They are not tracked anywhere standard.
-3. Ask whether they have scientific context to share now, or would rather do the deeper
-   analysis after the basic figures. If they want it now, go to Part 3. Otherwise make the
-   standard figures and anything else they asked for.
+3. Offer the ways forward:
+   - **Step by step** (the default): ask whether they have scientific context to share
+     now, or would rather do the deeper analysis after the basic figures. If they want it
+     now, go to Part 3. Otherwise make the standard figures and anything else they asked
+     for.
+   - **One-shot**: you make the whole report in one pass, with no further questions or
+     confirmations, and return a PowerPoint built on your best assumptions, listed on its
+     last slide. Offer it in one line; it suits a first look or a project the scientist
+     knows well enough to correct afterwards. See "One-shot report" below.
 
 When the standard figures are done, ask whether they want them in a slide deck. Then go
 on to the deeper analysis, unless it is already done.
+
+## One-shot report
+
+When the scientist picks one-shot, stop asking. Every place this skill says "ask" or
+"confirm" becomes "decide, and write the decision down". Nothing is sent to the customer;
+the deck is a draft for the scientist to correct.
+
+1. **Choose the features yourself.** If the sample table gives organ and species, pick
+   canonical marker genes for that tissue's main cell types and keep only those with
+   FDR <= 0.05 for some cluster in `p.top_ranked_genes("cluster")`. Label each row with
+   the cell type and the cluster that carries it. Write them to a JSON file with the
+   `CONFIG` keys plus an `"assumptions"` list of sentences saying what you chose and why,
+   and pass it with `--config`. If organ or species is unknown, use `--one-shot` instead:
+   it takes the best-FDR informative gene of each of the three largest clusters and
+   labels rows by cluster only (`atx_figures.auto_feature_config`).
+2. **Render and build in one box job**: `python render_figures.py <project> --one-shot`
+   (or `--config <file>`), then `python build_report_deck.py . --draft`, then render the
+   deck with LibreOffice and look at every slide (`references/deck.md`, "Visual review").
+   Fix what you can see is wrong; that review is yours to do, not the scientist's.
+3. **Return the deck** as an artifact, with a short message giving the assumptions, the
+   slides left out and why, and what the step-by-step route would add.
+
+What one-shot still never does:
+
+- **Launch compare clusters.** A launch spends Latch compute and needs a comparison
+  someone chose, so it keeps its confirmation. The differential-motif slide is left out
+  unless the scientist named a Compare run when choosing one-shot (`compare_run` and
+  `compare_mapping` in the config, mapping checked with `check_group_mapping`).
+- **Recompute statistics**, skip the four checks, or claim biology. Slide titles are
+  descriptive (`build_report_deck.py`), and every differential number keeps its rule.
+- **Delete the cache.** Clear the job scratch as usual, keep the project cache, and ask
+  the finished-or-coming-back question in the closing message.
+
+The deck's last slide, "Assumptions in this draft", lists every choice made in place of a
+question and every slide left out. It is an editable table; the scientist removes it
+before the deck goes to the customer.
 
 ## Part 1: samples and metadata
 
@@ -137,9 +179,16 @@ unknown. Ask the scientist for those rather than guessing; they matter for Part 
 `render_figures.py` carries a per-project `CONFIG` block holding the marker genes, the
 motifs, the Compare run and the GroupA/GroupB mapping. **That block is scientific input,
 not boilerplate**: it is the one place a wrong answer looks like a right one, so confirm
-it with the scientist before rendering. The script refuses to run for a project it has no
-entry for rather than guessing. Every figure runs under a guard that records failures
-(and skips) in `render_report.json` and keeps going.
+it with the scientist before rendering. A project with no entry gets the standard figures
+only: the gene, coverage-track and motif panels are skipped, not guessed. `--config
+<file.json>` supplies the choices without editing the script, and `--one-shot` picks
+marker genes from the data (see "One-shot report"). Every figure runs under a guard that
+records failures (and skips) in `render_report.json` and keeps going. It also writes
+`samples_<project>.csv`, the sample table.
+
+**The deck for any project:** `python build_report_deck.py <render_dir>` assembles the
+standard slides from whatever was rendered, dropping a slide whose figures failed or were
+skipped. `build_demo_deck.py` is the hand-tuned Demo_001 version.
 
 ### The generators
 
@@ -308,7 +357,9 @@ back to recomputing. Drawing the differential motif slide from a run:
 
 ## Part 4: the slide deck
 
-Only when the scientist asks. Read `references/deck.md` before calling `build_deck()`. It
+Only when the scientist asks (or in a one-shot). `scripts/build_report_deck.py` builds
+the standard deck from a render folder. Read `references/deck.md` before calling
+`build_deck()` or changing slides. It
 covers starting from the delivered deck's slide inventory, the branded template and its
 layouts, the fixed slide structures (clustering, neighborhood, QC, track browser),
 structural validation and visual review, the LibreOffice-vs-PowerPoint traps, density,

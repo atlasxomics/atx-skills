@@ -1398,3 +1398,57 @@ def subset_to_groups(adata, column, groups):
     if keep.sum() == 0:
         raise ValueError(f"no cells in {groups} of {column!r}")
     return adata[keep].copy()
+
+
+# ------------------------------------------------------------------ one-shot defaults
+
+#: Gene names that make poor report markers: predicted genes, miRNA hosts, RIKEN clones,
+#: olfactory receptors, snoRNAs. They top rankings because a near-zero score moves a lot.
+UNINFORMATIVE_GENE = r"^(?:Gm\d|Mir\d|MIR\d|LOC\d|Snor|SNOR|Olfr|Or\d|LINC|Linc)|Rik$|-AS\d$|^ENS"
+
+#: CisBP seqlogo files ship for these builds only; motif identity does not depend on the
+#: assembly, so other builds of the same species use these.
+LOGO_GENOME = {"mm39": "mm10", "mm10": "mm10", "hg38": "hg38", "hg19": "hg38",
+               "rn6": "rn6", "rn7": "rn6", "rn8": "rn6"}
+
+
+def auto_feature_config(project, cells, n_genes: int = 3, genome: Optional[str] = None):
+    """A render_figures config built from the data alone, for a one-shot report.
+
+    Marker genes: the best-FDR informative gene of each of the `n_genes` largest clusters
+    (`Project.top_ranked_genes`), one gene per cluster, no repeats; a cluster with no
+    qualifying gene is passed over for the next largest. No motifs and no Compare run:
+    those need a comparison someone chose, so the differential-motif slide is left out.
+
+    Returns (config, assumptions). Every entry in `assumptions` is a sentence for the
+    scientist; the one-shot deck prints them on its last slide.
+    """
+    import re
+    sizes = cells.obs["cluster"].astype(str).value_counts()
+    top, rule = project.top_ranked_genes("cluster", n=50)
+    top = top[~top["name"].astype(str).str.contains(UNINFORMATIVE_GENE, regex=True)]
+    genes, rows, picked = [], {}, []
+    for cl in sizes.index:
+        cand = [g for g in top.loc[top["group_name"] == cl, "name"].astype(str) if g not in genes]
+        if cand:
+            genes.append(cand[0])
+            rows[cand[0]] = f"{cand[0]}: {cl} marker"
+            picked.append(f"{cand[0]} ({cl}, {sizes[cl]} cells)")
+        if len(genes) == n_genes:
+            break
+    genome = genome or str(project.input_parameters().get("genome", "")) or None
+    cfg = {"genome": genome, "logo_genome": LOGO_GENOME.get(genome or "", "mm10"),
+           "genes": genes, "gene_rows": rows, "motifs": [], "compare_run": None,
+           "compare_column": None, "compare_mapping": None, "compare_groups": [],
+           "colors": None}
+    assumptions = [
+        "Marker genes were chosen from the data, not from the tissue's known cell types: "
+        f"the top informative gene of each of the {len(genes)} largest clusters, "
+        f"{', '.join(picked)}. Rule: {rule.replace('top 50 by FDR', 'best FDR first')}.",
+        "Gene rows are labelled by cluster, not cell type; no cell types were assigned.",
+        "No differential motif slide: no comparison was chosen and no Compare run was "
+        "launched.",
+        "Cluster colours use the default palette; they will not match the Latch viewer's.",
+    ]
+    return cfg, assumptions
+
