@@ -99,8 +99,9 @@ The table itself also varies by project, which the formatting rules above do NOT
 - Demo_003 prints FRiP to **three** decimals (0.211) where Demo_001 and Demo_002 use two. The
   rounding rules verified above hold for Demo_001 and Demo_002 only; treat column set
   and precision as per-deck settings rather than constants.
-- Demo_003 `Sample` is an external specimen label (`NL39-6wk-1069349-S6-R4`), matching neither
-  `medians.csv:condition` nor `obs.csv:SampleName` patterns seen elsewhere.
+- Demo_003 `Sample` is an external specimen label supplied by the customer, matching
+  neither the `medians.csv:condition` nor the `obs.csv:SampleName` pattern seen
+  elsewhere. Read it from the deck rather than deriving it.
 
 ### Violin generator verification (Demo_002, 2026-11-11)
 

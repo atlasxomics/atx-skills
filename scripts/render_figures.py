@@ -46,14 +46,38 @@ CONFIG = {
         "colors": "DEMO_CLUSTER_COLORS",
     },
 }
+
+#: Used for any project with no CONFIG entry: the standard figures only. Empty selections
+#: SKIP their panels rather than failing, so a first pass can run before the scientist has
+#: chosen marker genes, motifs or a comparison. The guard that matters is still in place —
+#: nothing here guesses a feature; those panels simply are not drawn.
+#:
+#: DO NOT add real project, customer or run names to this file. It is published.
+STANDARD_ONLY = {
+    "genome": None,                 # taken from the project's input_parameters.csv
+    "logo_genome": "mm10",          # no CisBP seqlogo file ships for mm39
+    "genes": [],
+    "gene_rows": {},
+    "motifs": [],
+    "compare_run": None,
+    "compare_column": None,
+    "compare_mapping": None,
+    "compare_groups": [],
+    "colors": None,                 # no pinned palette: use the H5 default
+}
 cfg = CONFIG.get(PROJ)
 if cfg is None:
-    raise SystemExit(f"No feature configuration for {PROJ!r}. Add one to CONFIG after "
-                     f"agreeing the marker genes and motifs with the requester.")
+    cfg = dict(STANDARD_ONLY)
+    print(f"No feature configuration for {PROJ!r}: rendering the standard figures only. "
+          "Gene-activity, coverage-track and differential-motif panels are skipped until "
+          "marker genes, motifs and a comparison are agreed with the scientist.")
 
 p = Project(PROJ, cache="/data/analysis_cache")
+if not cfg.get("genome"):
+    import pandas as _pd
+    cfg["genome"] = str(_pd.read_csv(p.table("input_parameters.csv"))["genome"].iloc[0])
 cells = p.cell_adata()
-CM = getattr(F, cfg["colors"])
+CM = getattr(F, cfg["colors"]) if cfg.get("colors") else None
 samples = F.natural_sort(cells.obs["sample"].unique().tolist())
 labels = F.deck_panel_labels(cells, samples)
 
@@ -73,6 +97,12 @@ def guard(name, fn):
                                    "error": f"{type(e).__name__}: {e}",
                                    "tb": traceback.format_exc()[-600:]}
         print(f"FAIL {name}: {type(e).__name__}: {str(e)[:200]}")
+
+
+def skip(name, reason):
+    """Record a panel that is not applicable, distinct from one that failed."""
+    report["figures"][name] = {"status": "SKIPPED", "reason": reason}
+    print(f"SKIP {name}: {reason}")
 
 
 def emit(fig, name, w, h, scale=2):
@@ -95,8 +125,11 @@ guard("umap_cluster", lambda: emit(
                         cells.obs["cluster"].astype(str).unique().tolist()))[0],
     "umap_cluster", 640, 460))
 
-guard("umap_sample", lambda: emit(
-    F.umap_overview(cells, color_by="SampleName")[0], "umap_sample", 640, 460))
+if len(samples) > 1:
+    guard("umap_sample", lambda: emit(
+        F.umap_overview(cells, color_by="SampleName")[0], "umap_sample", 640, 460))
+else:
+    skip("umap_sample", "single-sample project: one colour")
 
 # --- slide 3: neighborhood grid + cluster proportion ----------------------------------
 def _nb():
@@ -163,7 +196,10 @@ def _tracks():
             "png": f"{PROJ}__tracks_{gene}.png", "locus": model["locus"],
             "shared_max": info.get("shared_max")}
         print(f"OK   tracks_{gene}  {model['locus']}  max {info.get('shared_max')}")
-guard("tracks", _tracks)
+if cfg["genes"]:
+    guard("tracks", _tracks)
+else:
+    skip("tracks", "no marker genes chosen yet (coverage bigwigs not fetched)")
 
 # --- slide 9: gene-activity blocks + annotated UMAP -----------------------------------
 def _genes():
@@ -188,13 +224,19 @@ def _genes():
                                  cells2.obs["cluster"].astype(str).unique().tolist()))
     F.annotate_umap(fig, tops)
     emit(fig, "umap_cluster_annotated", 720, 600)
-guard("gene_blocks", _genes)
+if cfg["genes"]:
+    guard("gene_blocks", _genes)
+else:
+    skip("gene_blocks", "no marker genes chosen yet")
 
 # --- slide 10: peak counts ------------------------------------------------------------
-for lvl in ("cluster", "sample"):
+levels = ("cluster", "sample") if len(samples) > 1 else ("cluster",)
+for lvl in levels:
     guard(f"peaks_per_{lvl}",
           lambda lvl=lvl: emit(F.peaks_per_group(p, lvl)[0],
                                f"peaks_per_{lvl}", 1000, 650))
+if "sample" not in levels:
+    skip("peaks_per_sample", "single-sample project")
 
 # --- slide 11: differential motifs, from the Compare workflow's own statistics ---------
 def _motifs():
@@ -233,7 +275,10 @@ def _motifs():
     df.to_csv(f"{PROJ}__all_motifs.csv", index=False)
     report["notes"].append(f"compare motif rows: {len(df)}")
     emit(F.motif_rank_plot(df)[0], "motif_rank", 760, 620)
-guard("motifs", _motifs)
+if cfg["compare_run"] and cfg["motifs"]:
+    guard("motifs", _motifs)
+else:
+    skip("motifs", "no compare run / motifs chosen yet")
 
 # --- appendix: the QC table and its spatial maps --------------------------------------
 def _qc():
