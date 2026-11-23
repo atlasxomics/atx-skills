@@ -109,6 +109,11 @@ It will usually open with something like "Can you make me a data report for
      last slide. Offer it in one line; it suits a first look or a project the scientist
      knows well enough to correct afterwards. See "One-shot report" below.
 
+Talk to the scientist about samples, cell types, genes and comparisons, never about the
+skill's internals: script names, config blocks, JSON keys, flags and file formats stay on
+your side. If you need a choice from them, ask the biological question and translate the
+answer yourself.
+
 When the standard figures are done, ask whether they want them in a slide deck. Then go
 on to the deeper analysis, unless it is already done.
 
@@ -179,7 +184,11 @@ unknown. Ask the scientist for those rather than guessing; they matter for Part 
 `render_figures.py` carries a per-project `CONFIG` block holding the marker genes, the
 motifs, the Compare run and the GroupA/GroupB mapping. **That block is scientific input,
 not boilerplate**: it is the one place a wrong answer looks like a right one, so confirm
-it with the scientist before rendering. A project with no entry gets the standard figures
+it with the scientist before rendering. Ask in their terms, never by the block's name:
+"Which marker genes should I show, and what cell type does each mark?", "Any motifs of
+interest?", "Which comparison should the differential slide use, and which samples or
+clusters are on each side?" Then fill the block (or a `--config` file) yourself from the
+answers. A project with no entry gets the standard figures
 only: the gene, coverage-track and motif panels are skipped, not guessed. `--config
 <file.json>` supplies the choices without editing the script, and `--one-shot` picks
 marker genes from the data (see "One-shot report"). Every figure runs under a guard that

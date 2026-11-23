@@ -16,6 +16,9 @@ scripts/render_figures.py     renders every figure a report needs, in one pass o
 scripts/atx_compare.py        differential analysis: fetch, check and plot compare clusters runs;
                               launch a new one after the scientist confirms
 scripts/atx_deck.py           PowerPoint assembly (runs locally, not on the box)
+scripts/atx_slots.py          slide slot geometry shared by the two dense-deck scripts
+scripts/slide_figures.py      every deck figure drawn at its slot size (runs on the box)
+scripts/dense_deck.py         the default deck: figures placed at 100%, driven by a JSON spec
 scripts/build_report_deck.py  the standard deck for any project, from a render_figures output
                               folder (--draft adds the one-shot assumptions slide)
 scripts/build_demo_deck.py    the Demo_001 deck, as a worked example of atx_deck

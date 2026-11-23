@@ -1,8 +1,131 @@
 # Building the AtlasXomics deck
 
-Read this before calling `atx_deck.build_deck()`. The figure rules in `SKILL.md`
+Read this before building a deck. The figure rules in `SKILL.md`
 (orientation, cropping, every sample, one palette, isotropic panels) still apply; this
 file covers turning those figures into slides. `atx_deck.py` runs locally, not on the box.
+
+## Dense deck (the default)
+
+Build customer decks with `slide_figures.py` (on the box) and `dense_deck.py` (locally).
+`build_report_deck.py` and `build_deck()` below remain for the older layout; their slides
+came back from review as too sparse with unreadable labels, and the rules in this section
+are what fixed that.
+
+```
+python slide_figures.py <project> --spec deck_spec.json --out figs   # box
+python dense_deck.py figs --spec deck_spec.json                      # local
+```
+
+`--one-shot` (no spec) chooses marker genes from the data, and `--draft` appends the
+assumptions slide, exactly as in the one-shot route.
+
+### The rule behind everything else: draw each figure at its slot size
+
+A picture on a slide is scaled to its slot, and every label inside it is scaled with it.
+A plotly canvas 1150 px wide placed in a 6 in column prints its 14 px labels at about
+7 pt. `atx_slots.SLOTS` holds the inch size of every slot, measured from the template:
+content starts under the subtitle (1.43 in, or 1.03 in with no subtitle), stops 0.1 in
+above the footer rule (6.70 in), with 0.22 in side margins and 0.12 in gaps. Each figure
+is drawn in matplotlib at exactly that size, every axes placed in inches (`ax_in`), and
+saved **without** `bbox_inches="tight"`, which would change the size. Placed at 100%, the
+font size in the code is the point size on the slide. The scale is:
+
+- titles inside a figure 15-18 pt; axis labels, legends, panel titles 12-14 pt;
+- dense secondary text (track y-limits, colourbar ticks on short rows) 9.5-11 pt, never less.
+
+A new template means re-measuring `atx_slots.py`, not nudging figures.
+
+### Slide structures
+
+Taken from slides the scientists approved; copy their layout, not their content:
+
+- **Clustering**: shared-scale spatial maps on the left with the cluster legend
+  underneath; UMAP by cluster stacked over UMAP by sample on the right, each with its
+  own legend. Sample legends use short names (`sample_short`): full `RUN|condition`
+  labels were cut off at the slot edge.
+- **Morphology**: one slide per run, three equal panels: clusters on brightfield,
+  brightfield, H&E. The H&E is never a slide of its own.
+- **Gene and motif rows**: one feature per row: label | spatial panels | UMAP |
+  colourbar | violin by cluster. Two rows per slide (three for motifs). The violin says
+  which cluster carries the signal; the spatial panels say where.
+- **Track browser**: three gene columns (ideogram with the locus marked, kb ruler, one
+  track per cluster on a shared y-axis, RefSeq model) and a small annotated UMAP top
+  right. A box marks every cluster whose gene score is at least 1 SD above the cluster
+  mean (`Ctx.top_clusters`), so the box is a rule, not a choice.
+- **Tables** are native PowerPoint tables at 14-16 pt, columns sized to their widest
+  string so short columns (run, sample, counts) never wrap.
+
+**An example slide is a formatting guide only.** When a scientist shares one, take its
+layout and nothing else: the genes on the track-browser slide are this project's own
+markers (`track_genes`), not the genes in the example.
+
+### The H&E panel
+
+The scientist supplies H&E images (often a PDF exported from a slide scanner);
+`he_images` in the spec points at them. `crop_he()` crops to the tissue, pads 4%, and
+widens to the **same aspect as the brightfield crop** beside it, so the three panels come
+out the same size. The H&E is at its own magnification, so it shows shape, not
+relative size. Two traps:
+
+- Scanner exports carry black margins and a thin edge line. Whiten only **large** dark
+  regions (>= 1% of the image): whitening every dark pixel punched white holes in dense
+  tissue.
+- Page titles, scale bars and the overview thumbnail are not tissue: pass them as
+  `he_exclude` page fractions, or the crop box grows to include them.
+
+### Palette and labels
+
+One `{cluster: hex}` palette for every figure (`palette`). When the scientist has
+delivered slides from the Latch viewer, sample the legend colours from one of them and
+use those; otherwise `default_cluster_colors()`. Spatial panel titles are clamped inside
+the figure (a small section's title overhung the left edge), and short rows use short
+sample names.
+
+### Titles
+
+Default titles are descriptive. Finding titles ("OLIG2 gene activity marks ...") go in
+the spec's `deck.titles` or per-slide `title` once the scientist has read the figures;
+the code never writes a claim.
+
+### The spec
+
+Everything project-specific lives in one JSON file next to the H&E images and any extra
+tables, so a new project needs no code changes. The keys are documented at the top of
+`slide_figures.py` (figures) and `dense_deck.py` (slides). A small example:
+
+```json
+{
+ "palette": {"C1": "#ff7f0e", "C2": "#1f77b4", "C3": "#2ca02c"},
+ "sample_labels": {"RUN1_SEQ001": "RUN1|CondA", "RUN2_SEQ002": "RUN2|CondB"},
+ "sample_short": {"RUN1_SEQ001": "CondA", "RUN2_SEQ002": "CondB"},
+ "cell_types": {"C1": "T cell", "C2": "B cell", "C3": "Red pulp macrophage"},
+ "rows": {"Cd3e": {"kind": "ge", "label": "Cd3e", "sublabel": "T cell"},
+          "Runx1-712": {"kind": "motif", "label": "Runx1 motif", "sublabel": ""}},
+ "track_genes": ["Cd3e", "Cd19", "Hmox1"],
+ "he_images": {"RUN1_SEQ001": {"pdf": "he.pdf", "page": 1}},
+ "he_exclude": {"RUN1_SEQ001": [[0, 0, 0.15, 1]]},
+ "deck": {"titles": {"clustering": ["Clustering shows distinct spatial features", null]},
+          "slides": [{"type": "samples"}, {"type": "clustering"}, {"type": "morphology"},
+                     {"type": "rows", "features": ["Cd3e", "Cd19"]}, {"type": "tracks"},
+                     {"type": "section", "title": "Appendix"}, {"type": "qc"},
+                     {"type": "table", "csv": "extra.csv", "title": "..."}]}
+}
+```
+
+`slide_figures.py` also accepts `render_figures.py`'s CONFIG keys (`genes`, `gene_rows`,
+`motifs`, `colors`), so a one-shot config drives it unchanged. `table` and `image` slides
+take any CSV or picture, which is how a project-specific appendix (a hypothesis table, an
+extra analysis) goes in without code.
+
+### Review is still required
+
+`dense_deck.py` refuses a deck that fails `validate_deck`, and the review in "Visual review
+is not optional" below still applies: render with soffice and look at every slide.
+Problems that only a render caught while building this layout: kb ruler labels printed
+over the ideogram; a colourbar label colliding with the violin axis; the sample legend cut
+off at the slot edge; and a subtitle-height figure overlapping the subtitle (caught by
+`SHAPE_OVERLAP`). Fix them in the figure code and re-render. Do not fix them by scaling
+the picture on the slide, which shrinks the type again.
 
 ## Start from the delivered deck, not from the PDF
 
