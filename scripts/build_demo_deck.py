@@ -38,7 +38,7 @@ def build(host, out_path=OUT):
 
     # Rendered as ONE plotly figure with a shared coloraxis by
     # atx_figures.neighborhood_grid() -- not montaged from the per-sample PNGs, which
-    # would give each panel its own duplicate colourbar.
+    # would give each panel its own duplicate colorbar.
     nb_grid = F("Demo_001__neighborhood_grid.png")
     qc = pd.read_csv(F(QC_TABLE))
 
@@ -69,7 +69,7 @@ def build(host, out_path=OUT):
                      [F("Demo_001__tracks_Hmox1.png")], [F("Demo_001__umap_cluster.png")]],
          "column_titles": ["Cd19", "Cd3e", "Hmox1", ""],
          "column_weights": [1, 1, 1, 0.85]},
-        # Each marker gene is shown as its spatial panels AND a UMAP coloured by the same
+        # Each marker gene is shown as its spatial panels AND a UMAP colored by the same
         # gene, two blocks per column, with the annotated cluster UMAP filling the fourth
         # cell. The spatial/UMAP pairing is the point of the slide -- see SKILL.md.
         {"title": "Gene Activity Scores identify distinct biological clusters",

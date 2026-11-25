@@ -236,7 +236,7 @@ def fixed_marker_motifs(df: pd.DataFrame, p: float = 0.05, effect: float = 0.4) 
     out["Significance"] = "Not significant"
     out.loc[sig & (out["mmean"] > 0), "Significance"] = "GroupA"
     out.loc[sig & (out["mmean"] < 0), "Significance"] = "GroupB"
-    out["relabelled"] = out["Significance"].ne(df["Significance"])
+    out["relabeled"] = out["Significance"].ne(df["Significance"])
     return out
 
 
@@ -276,7 +276,7 @@ def compare_volcano(df: pd.DataFrame, feature: str, group: str = "GroupA",
 def compare_rank_plot(df: pd.DataFrame, feature: str, group: str = "GroupA",
                       y_col: Optional[str] = None, color_col: str = "FDR",
                       n_labels: int = 4, width: int = 760, height: int = 620):
-    """The Plots Compare-tab rank plot. Genes rank by Log2FC, motifs by MeanDiff, coloured
+    """The Plots Compare-tab rank plot. Genes rank by Log2FC, motifs by MeanDiff, colored
     by FDR with PuBu_r and marker size 6, as in plots_epigenome/compare/*_results.py."""
     import atx_plots_lib as L
     y_col = y_col or FEATURES[feature][2]

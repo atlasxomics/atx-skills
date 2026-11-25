@@ -103,7 +103,7 @@ if cfg.get("logo_genome") is None:
 # One palette for every figure. A named palette (e.g. "DEMO_CLUSTER_COLORS") or an
 # explicit {cluster: hex} dict from a JSON config wins; otherwise pin the H5 default in
 # the viewer's order. Never leave this None: the generators' own defaults disagree with
-# each other, so an unpinned run colours the same cluster differently on different slides.
+# each other, so an unpinned run colors the same cluster differently on different slides.
 _colors = cfg.get("colors")
 if isinstance(_colors, str):
     CM = getattr(F, _colors)
@@ -113,7 +113,7 @@ else:
     CM = F.default_cluster_colors(cells.obs["cluster"].astype(str).unique())
 _missing = sorted(set(cells.obs["cluster"].astype(str)) - set(CM))
 if _missing:
-    raise KeyError(f"palette has no colour for clusters {_missing}")
+    raise KeyError(f"palette has no color for clusters {_missing}")
 samples = F.natural_sort(cells.obs["sample"].unique().tolist())
 labels = F.deck_panel_labels(cells, samples)
 
@@ -205,7 +205,7 @@ if len(samples) > 1:
     guard("umap_sample", lambda: emit(
         F.umap_overview(cells, color_by="SampleName")[0], "umap_sample", 640, 460))
 else:
-    skip("umap_sample", "single-sample project: one colour")
+    skip("umap_sample", "single-sample project: one color")
 
 # --- slide 3: neighborhood grid + cluster proportion ----------------------------------
 def _nb():

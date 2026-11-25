@@ -319,7 +319,7 @@ def montage(paths, out_path, cols=2, pad=14, bg=(255, 255, 255)):
     beside the proportion bar. Stacking them in a deck column would make each one tiny,
     so they are composed into a single picture first and placed as one image.
 
-    Cells are sized to the widest and tallest input and each panel is centred in its cell,
+    Cells are sized to the widest and tallest input and each panel is centered in its cell,
     so panels of slightly different pixel sizes stay aligned and undistorted.
     """
     paths = [p for p in paths if p and os.path.exists(p)]

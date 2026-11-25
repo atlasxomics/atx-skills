@@ -28,13 +28,16 @@ H_NOSUB = BOTTOM - Y_NOSUB                       # 5.67
 SLOTS = {
     # clustering slide (title only): spatial maps left, two stacked UMAPs right
     "cluster_spatial": (8.55, 5.58), "umap_cluster": (4.22, 2.73), "umap_sample": (4.22, 2.73),
-    # putative cell types: spatial maps left, labelled UMAP right
+    # One sample means no UMAP by sample: the cluster UMAP is drawn at the full height of
+    # the right column instead, rather than being stretched there (ASPECT_DISTORTED).
+    "umap_cluster_tall": (4.22, 2.73 * 2 + GAP),
+    # putative cell types: spatial maps left, labeled UMAP right
     "celltype_spatial": (8.30, H_SUB), "celltype_umap": (4.47, H_SUB),
     # neighborhood grid left, cluster proportion right
     "neighborhood": (7.55, 5.58), "proportion": (5.22, 5.58),
     # morphology: clusters on brightfield | brightfield | H&E, one slide per run
     "morph": (CONTENT_W, H_SUB),
-    # one feature per row: spatial panels + UMAP + colourbar + violin by cluster
+    # one feature per row: spatial panels + UMAP + colorbar + violin by cluster
     "row2": (CONTENT_W, 2.575), "row3": (CONTENT_W, 1.677),
     # track browser: three gene columns + a small annotated UMAP
     "track_col": (3.52, H_SUB), "track_umap": (1.97, 2.55),
@@ -44,5 +47,5 @@ SLOTS = {
 }
 
 #: Type sizes in points. Labels a reader must read on the slide are 12-18 pt; dense
-#: secondary text (track y-limits, colourbar ticks on short rows) never below 9.5 pt.
+#: secondary text (track y-limits, colorbar ticks on short rows) never below 9.5 pt.
 PT = {"header": 17, "panel_title": 15, "label": 13, "tick": 12, "legend": 13, "small": 10.5}

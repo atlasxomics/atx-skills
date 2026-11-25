@@ -22,10 +22,10 @@ Slide types (each takes optional "title", "subtitle", "notes"):
 `morphology` emits one slide per run ("subtitles": {run_id: text}). `rows` takes 2 or 3
 features and picks the matching slot. Paths in the spec are relative to the spec file.
 
-With no "slides", the default plan is the standard report: samples, clustering, putative
-cell types (if the spec names them), neighborhood, one morphology slide per run, marker
-heatmaps, gene rows two per slide, track browser, motif rows three per slide, peaks; then
-Appendix with QC, appendix rows and the workflow. Default titles are descriptive, not
+With no "slides", the default plan is the standard report: samples, clustering,
+neighborhood, one morphology slide per run, marker heatmaps, gene rows two per slide,
+track browser, motif rows three per slide, peaks; then Appendix with QC, the putative
+cell-type table and map (if the spec names cell types), appendix rows and the workflow. Default titles are descriptive, not
 findings: a scientist writes the finding titles (deck.titles) after reading the figures.
 
 Every build is checked by atx_deck.validate_deck and refused if any finding remains.
@@ -51,13 +51,13 @@ DEFAULT_TITLES = {
     "celltype_table": ("Putative cell types assigned from marker gene activity",
                        "Putative: inferred from gene activity, not validated by IHC or molecular profiling"),
     "celltype_map": ("Putative cell types in tissue",
-                     "Putative: not validated by IHC or molecular profiling; colours match the clusters throughout"),
+                     "Putative: not validated by IHC or molecular profiling; colors match the clusters throughout"),
     "neighborhood": ("Neighborhood enrichment and cluster proportions",
                      "Neighborhood enrichment: how often each cluster is adjacent to another (higher is more related)"),
     "morphology": ("Clustering on tissue morphology: {label}", None),
     "heatmaps": ("Differential genes, peaks and motifs between clusters",
                  "ArchR marker features, each cluster vs all others; Pval <= 0.05 & Log2FC >= 0.1"),
-    "rows": ("Gene activity of marker genes", "Spatial panels share one colour scale per feature"),
+    "rows": ("Gene activity of marker genes", "Spatial panels share one color scale per feature"),
     "rows_motif": ("Transcription-factor motif activity",
                    "chromVAR deviation z-scores per spot; a motif is shared within its TF family"),
     "tracks": ("Coverage at marker gene loci",
@@ -125,7 +125,7 @@ class Deck:
         return s.shapes.add_picture(path, Inches(x), Inches(y), Inches(w), Inches(h))
 
     def fit_pic(self, s, path, x, y, w, h):
-        """Largest placement of `path` inside (w, h), centred horizontally. For pictures not
+        """Largest placement of `path` inside (w, h), centered horizontally. For pictures not
         drawn at slot size (ArchR's PDFs, the workflow diagram, user images)."""
         iw, ih = Image.open(path).size
         sc = min(w / iw, h / ih)
@@ -237,10 +237,15 @@ class Deck:
         self.pic(s, a, X0, y, w * k, h * k)
         ux = X0 + w * k + GAP
         uw, uh = SLOTS["umap_cluster"]
-        if b:
+        if b and c:
             self.pic(s, b, ux, y, uw * k, uh * k)
-        if c:
             self.pic(s, c, ux, y + (uh + GAP) * k, uw * k, uh * k)
+        elif b:
+            # Single-sample project: no UMAP by sample, so the cluster UMAP was drawn at
+            # the full height of the right column (slot umap_cluster_tall) and goes in at
+            # its own size -- stretching it here would distort it.
+            tw, th = SLOTS["umap_cluster_tall"]
+            self.pic(s, b, ux, y, tw * k, th * k)
 
     def s_celltype_table(self, sp):
         ct = self.spec.get("cell_types")
@@ -253,8 +258,13 @@ class Deck:
         main = self.rep.get("cluster_main_sample", {})
         ev = self.spec.get("cell_type_evidence", {})
         conf = self.spec.get("cell_type_confidence", {})
-        rows = [{"Cluster": c, "Putative cell type": ct.get(c, ""), "Spots": f"{sizes.get(c, 0):,}",
-                 "Main sample": main.get(c, ""), "Supporting evidence": ev.get(c, ""),
+        top = self.rep.get("cluster_top_genes", {})
+        one_sample = len(self.rep.get("samples", [])) < 2
+        rows = [{"Cluster": c, "Putative cell type": ct.get(c, ""),
+                 "Strongest genes": top.get(c, ""), "Spots": f"{sizes.get(c, 0):,}",
+                 # One sample makes this column "D3145 (100%)" on every row.
+                 "Main sample": "" if one_sample else main.get(c, ""),
+                 "Supporting evidence": ev.get(c, ""),
                  "Confidence": conf.get(c, "")} for c in self.rep["clusters"]]
         df = pd.DataFrame(rows)
         df = df[[c for c in df.columns if df[c].astype(str).str.len().sum()]]
@@ -385,7 +395,7 @@ class Deck:
             qc["median fragments per spot"] = qc["median fragments per spot"].map("{:,}".format)
         t, sub = self.title_for("qc", sp)
         notes = sp.get("notes", "The pipeline's obs column 'log10_nFrags' holds the natural log of nFrags "
-                                "(archr_objs.R: log(metadata$nFrags)); the map is labelled ln(nFrags).")
+                                "(archr_objs.R: log(metadata$nFrags)); the map is labeled ln(nFrags).")
         s, y = self.slide(t, sub, notes)
         self.table(s, qc, y + 0.05, pt=14, row_h=0.40)
         qw, qh = SLOTS["qc_map"]
@@ -425,14 +435,15 @@ class Deck:
         ge = [f for f in main if rows[f]["kind"] == "ge"]
         mo = [f for f in main if rows[f]["kind"] != "ge"]
         plan = [{"type": "samples"}, {"type": "clustering"}]
-        if self.spec.get("cell_types"):
-            plan += [{"type": "celltype_table"}, {"type": "celltype_map"}]
         plan += [{"type": "neighborhood"}, {"type": "morphology"}, {"type": "heatmaps"}]
         plan += [{"type": "rows", "features": ge[i:i + 2]} for i in range(0, len(ge), 2)]
         if self.rep.get("track_genes"):
             plan.append({"type": "tracks"})
         plan += [{"type": "rows", "features": mo[i:i + 3]} for i in range(0, len(mo), 3)]
         plan += [{"type": "peaks"}, {"type": "section", "title": "Appendix"}, {"type": "qc"}]
+        if self.spec.get("cell_types"):
+            # Putative calls are supporting material, not the report's headline.
+            plan += [{"type": "celltype_table"}, {"type": "celltype_map"}]
         plan += [{"type": "rows", "features": app[i:i + 2]} for i in range(0, len(app), 2)]
         if self.spec.get("genome_heatmap"):
             plan.append({"type": "genome"})

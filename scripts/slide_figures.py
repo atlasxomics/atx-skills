@@ -52,6 +52,10 @@ from atx_slots import SLOTS
 
 Image.MAX_IMAGE_PIXELS = None
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+#: Share of a feature row the violin may take. The spatial panels and UMAP are square and
+#: height-limited, so without a cap the violin absorbs the rest of the row.
+VIOLIN_FRAC = 0.30
 plt.rcParams.update({"font.size": 13, "font.family": "DejaVu Sans", "axes.titlesize": 14,
                      "axes.labelsize": 13, "xtick.labelsize": 12, "ytick.labelsize": 12,
                      "legend.fontsize": 13, "axes.spines.top": False, "axes.spines.right": False})
@@ -163,7 +167,7 @@ class Ctx:
         self.cm = dict(pal) if pal else F.default_cluster_colors(clusters)
         missing = sorted(set(clusters) - set(self.cm))
         if missing:
-            raise KeyError(f"palette has no colour for clusters {missing}")
+            raise KeyError(f"palette has no color for clusters {missing}")
         self.cl = F.natural_sort(clusters)
         self.cell_types = spec.get("cell_types", {})
         # geometry
@@ -341,7 +345,14 @@ def umap_fig(C, name, colors, items, header, slot, legend="right", fontsize=13):
 
 
 def fig_umaps(C):
-    umap_fig(C, "umap_cluster", C.clu_col, [(c, C.cm[c]) for c in C.cl], "UMAP by cluster", "umap_cluster")
+    tall = len(C.samples) < 2
+    umap_fig(C, "umap_cluster", C.clu_col, [(c, C.cm[c]) for c in C.cl], "UMAP by cluster",
+             "umap_cluster_tall" if tall else "umap_cluster")
+    if tall:
+        # One sample is one color: the panel carries no information, and the clustering
+        # slide gives its space to the cluster UMAP instead.
+        C.report["figures"]["umap_sample"] = "SKIP single-sample project: one color"
+        return
     sc = np.array([C.scol[s] for s in C.smp])
     umap_fig(C, "umap_sample", sc, [(C.short[s], C.scol[s]) for s in C.samples], "UMAP by sample", "umap_sample")
 
@@ -367,7 +378,7 @@ def fig_neighborhood(C):
     n = len(C.samples)
     cols = 1 if n == 1 else 2
     rows = -(-n // cols)
-    cb_cell = n % 2 == 1 and n > 1        # odd count: the colourbar takes the empty cell
+    cb_cell = n % 2 == 1 and n > 1        # odd count: the colorbar takes the empty cell
     cb_w = 0 if (cb_cell or n == 1) else 1.6
     if n == 1:
         cb_w = 1.6
@@ -489,7 +500,7 @@ def fig_morph(C, s):
 
 
 def fig_row(C, feat, slot):
-    """One feature: label | spatial panels | UMAP | colourbar | violin by cluster."""
+    """One feature: label | spatial panels | UMAP | colorbar | violin by cluster."""
     r = C.rows.get(feat, {"kind": "ge", "label": feat, "sublabel": ""})
     w, h = SLOTS[slot]
     big = h > 2.0
@@ -510,14 +521,25 @@ def fig_row(C, feat, slot):
     lab_w, yb = 0.62, 0.04
     inner = h - 0.08
     title_h = 0.30 if big else 0.27
-    axes, sc, tot = spatial_row(C, fig, lab_w, yb, 5.3, inner, title_h=title_h, title_pt=t_pt,
-                                min_w=1.12 if big else 1.0, gap=0.08,
-                                labels=None if big else C.short)
+    sp = dict(title_h=title_h, title_pt=t_pt, min_w=1.12 if big else 1.0, gap=0.08,
+              labels=None if big else C.short)
+    # The spatial panels and the UMAP are square and limited by the row height, so an
+    # uncapped violin takes whatever width is left -- most of the row on a single-sample
+    # project, which reads as a violin slide. Cap it at VIOLIN_FRAC of the row and center
+    # the group, so the spatial panels carry the slide. Measure the panels on a throwaway
+    # figure first; spatial_row only places axes, so this costs nothing.
+    probe = plt.figure(figsize=(w, h))
+    _, _, tot = spatial_row(C, probe, lab_w, yb, 5.3, inner, **sp)
+    plt.close(probe)
+    side = inner - title_h
+    fixed = tot + 0.12 + side + 0.08 + 0.13 + 0.70 + 0.62   # panels, UMAP, colorbar, ylabel room
+    vio_w = min(w - lab_w - fixed - 0.08, max(2.6, VIOLIN_FRAC * w))
+    shift = max(0.0, (w - lab_w - 0.08 - fixed - vio_w) / 2)
+    axes, sc, tot = spatial_row(C, fig, lab_w + shift, yb, 5.3, inner, **sp)
     im = None
     for s, ax in axes.items():
         im = spatial_points(C, ax, s, sc[s], v, cmap="RdYlBu_r", vmin=vmin, vmax=vmax)
-    x = lab_w + tot + 0.12
-    side = inner - title_h
+    x = lab_w + shift + tot + 0.12
     axu = ax_in(fig, x, yb, side, side)
     o = np.argsort(v)
     axu.scatter(C.um[o, 0], C.um[o, 1], c=v[o], cmap="RdYlBu_r", vmin=vmin, vmax=vmax, s=0.35,
@@ -532,7 +554,7 @@ def fig_row(C, feat, slot):
     cb.update_ticks()
     x += 0.13 + 0.70 + 0.62
     vb = yb + 0.30
-    axv = ax_in(fig, x, vb, w - x - 0.08, yb + side - vb)
+    axv = ax_in(fig, x, vb, vio_w, yb + side - vb)
     lo, hi = np.nanpercentile(v, 0.5), np.nanpercentile(v, 99.5)
     data = [np.clip(v[(C.clu == c) & np.isfinite(v)], lo, hi) for c in C.cl]
     parts = axv.violinplot(data, positions=range(len(C.cl)), widths=0.8, showextrema=False, showmedians=True)
@@ -548,7 +570,7 @@ def fig_row(C, feat, slot):
     axv.tick_params(axis="y", labelsize=11 if big else 10)
     axv.set_ylabel(clab, fontsize=12 if big else 10.5)
     axv.set_xlim(-0.6, len(C.cl) - 0.4)
-    ftext(fig, x + (w - x - 0.08) / 2, yb + side + 0.05, "By cluster", ha="center", va="bottom", fontsize=t_pt)
+    ftext(fig, x + vio_w / 2, yb + side + 0.05, "By cluster", ha="center", va="bottom", fontsize=t_pt)
     save(fig, C.out, C.proj, f"row_{feat}_{slot}")
 
 
@@ -869,6 +891,15 @@ def main():
         main_s[c] = (f"{C.short[top]} ({frac[top]:.0%})" if frac[top] >= 0.75
                      else f"mixed ({int((frac > 0.05).sum())} samples)")
     C.report["cluster_main_sample"] = main_s
+    # Strongest genes per cluster, for the cell-type table: the project's own one-vs-rest
+    # test, not a recomputation. Best FDR first, which is the order the file is written in.
+    try:
+        ranked, rule = C.p.top_ranked_genes("cluster")
+        C.report["cluster_top_genes"] = {c: ", ".join(ranked.loc[ranked["group_name"] == c, "name"].head(3))
+                                         for c in C.cl}
+        C.report["cluster_top_genes_rule"] = rule
+    except Exception as e:                                  # no ranked-gene table for this project
+        C.report["cluster_top_genes_error"] = f"{type(e).__name__}: {e}"
     json.dump(C.report, open(os.path.join(a.out, "slide_figures_report.json"), "w"), indent=1, default=str)
     bad = [k for k, v in C.report["figures"].items() if v.startswith("FAIL")]
     print(f"\n{len(C.report['figures']) - len(bad)} ok/skipped, {len(bad)} failed: {bad}")

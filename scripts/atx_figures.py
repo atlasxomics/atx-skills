@@ -113,7 +113,7 @@ def shared_spatial_scale(fig, axes=None, pad=0.04):
     Plotly fits each subplot's range to its own data, so a 0.5 mm2 section fills its panel
     exactly as a 5.7 mm2 one does and the reader cannot tell which tissue is small. This
     gives every subplot the same x span and the same y span (the largest tissue's, padded
-    by `pad` per side), each centred on its own tissue. With equal subplot domains the
+    by `pad` per side), each centered on its own tissue. With equal subplot domains the
     panels then share one pixels-per-unit scale; `panel_scales()` confirms it.
 
     `axes` limits it to some x axes (e.g. ["x", "x2"]) when the figure also holds a
@@ -303,7 +303,7 @@ def neighborhood_enrichment(adata, sample_key="sample", cluster_key="cluster",
                             spatial_key="spatial", vmin=-100.0, vmax=100.0):
     """'Neighborhood analysis by sample' (catalog #3) — one z-score heatmap per sample.
 
-    The delivered slides show a per-sample grid on a shared -100..100 colour range, so the
+    The delivered slides show a per-sample grid on a shared -100..100 color range, so the
     enrichment is computed per sample rather than once over the pooled object.
     Uses `squidpy_analysis` then `plotly_heatmap`, both from the Plots code.
     """
@@ -330,7 +330,7 @@ def neighborhood_grid(nb, labels=None, cols=2, vmin=-100.0, vmax=100.0,
                       cell_px=340, colorbar_title="zscore"):
     """Compose the per-sample neighborhood heatmaps into ONE figure.
 
-    Montaging the individual PNGs gives every panel its own colourbar and its own
+    Montaging the individual PNGs gives every panel its own colorbar and its own
     (identical) scale, which wastes a third of the width and invites the reader to
     compare panels that are only coincidentally comparable. Here the panels share a
     single `coloraxis`, so one bar serves all three and the shared range is enforced by
@@ -379,7 +379,7 @@ def neighborhood_grid(nb, labels=None, cols=2, vmin=-100.0, vmax=100.0,
 # -------------------------------------------------------------- peak barplots
 
 #: Approximation of the ArchR peak-annotation palette read off the delivered slides.
-#: The exact colours are not defined in any repository available here.
+#: The exact colors are not defined in any repository available here.
 PEAK_ANNO_COLORS = {"Distal": "#4CAF50", "Exonic": "#64B5F6",
                     "Intronic": "#5E35B1", "Promoter": "#FFC107"}
 
@@ -646,7 +646,7 @@ def feature_panels(adata_cells, features, samples=None, pt_size=3,
     """Gene-activity (#6) and motif (#8) panels.
 
     One spatial figure per feature across samples, plus the matching UMAP, mirroring the
-    'Gene Activity Scores identify distinct biological clusters' slides. Colour limits are
+    'Gene Activity Scores identify distinct biological clusters' slides. Color limits are
     set per feature from its own range, as the H5 viewer does.
     """
     if samples is None:
@@ -674,7 +674,7 @@ def feature_panels(adata_cells, features, samples=None, pt_size=3,
 
 import contextlib as _contextlib
 
-#: The delivered reports are coloured by the Plots H5 viewer, whose categorical palette is
+#: The delivered reports are colored by the Plots H5 viewer, whose categorical palette is
 #: DEFAULT_H5_CATEGORICAL_PALETTE. Legend swatches sampled from the Demo_001 deck confirm it
 #: (#292F61 vs #282E66, #F6E76B vs #FAE64D, #723582 vs #7E2F8A, #AF423A vs #C33530).
 #: `generate_color_palette` cannot produce it — it maps matplotlib colormap names — so the
@@ -712,7 +712,7 @@ def umap_overview(adata, color_by="cluster", palette=None, point_size=2.2,
     """The single combined UMAP in the right column of the clustering slide.
 
     plot_umap_for_samples draws one panel per sample; the report's right column instead
-    shows every cell in one UMAP, coloured by cluster (top) and by sample (bottom).
+    shows every cell in one UMAP, colored by cluster (top) and by sample (bottom).
     """
     if palette is None:
         palette = H5_PALETTE
@@ -750,12 +750,12 @@ def umap_overview(adata, color_by="cluster", palette=None, point_size=2.2,
     return fig, cats
 
 
-#: Per-cluster colours read off the delivered Demo_001 slide 2 legend and snapped to
+#: Per-cluster colors read off the delivered Demo_001 slide 2 legend and snapped to
 #: the nearest DEFAULT_H5_CATEGORICAL_PALETTE entry (a clean bijection onto 15 of its 24
-#: colours, so the deck does use this palette). The H5 viewer assigns colours in its own
+#: colors, so the deck does use this palette). The H5 viewer assigns colors in its own
 #: internal category order, which is not stored anywhere in the project — so an exact
 #: per-cluster match for a NEW project cannot be derived, only a palette-consistent one.
-#: Supply a mapping like this when a delivered deck must be matched colour for colour.
+#: Supply a mapping like this when a delivered deck must be matched color for color.
 DEMO_CLUSTER_COLORS = {
     "C1": "#96C56C", "C2": "#9584B9", "C3": "#E38180", "C4": "#E48341", "C5": "#C33530",
     "C6": "#B570A8", "C7": "#9FD3E2", "C8": "#8E9ECD", "C9": "#E0C3DA", "C10": "#D0A970",
@@ -764,30 +764,30 @@ DEMO_CLUSTER_COLORS = {
 
 
 def ordered_palette(color_map, categories):
-    """Order an explicit {category: colour} map the way the ported plotters consume it.
+    """Order an explicit {category: color} map the way the ported plotters consume it.
 
-    `plot_umap_for_samples` does `sorted(unique())` then zips colours positionally, so a
+    `plot_umap_for_samples` does `sorted(unique())` then zips colors positionally, so a
     palette listed in that same lexicographic order (C1, C10, C11, ... C2, C3) reproduces
     any desired per-category assignment without touching the ported code.
     """
     cats = sorted(str(c) for c in categories)
     missing = [c for c in cats if c not in color_map]
     if missing:
-        raise KeyError(f"no colour supplied for {missing}")
+        raise KeyError(f"no color supplied for {missing}")
     return [color_map[c] for c in cats]
 
 
 def default_cluster_colors(categories, palette=None):
-    """One pinned {category: colour} map for a project with no palette of its own.
+    """One pinned {category: color} map for a project with no palette of its own.
 
     Left to their own defaults the generators disagree: `cluster_maps` assigns the H5
     palette in lexicographic label order (C1, C10, C11, ... C2, as `plot_umap_for_samples`
     does), `umap_overview` and `cluster_proportion` assign it in numeric order, and
     `morphology_overlay` uses matplotlib's "bright" cycle. The same cluster then changes
-    colour between slides (four checks, #4), and from 10 clusters up even the plotly
+    color between slides (four checks, #4), and from 10 clusters up even the plotly
     panels disagree with each other. Building the map once, in the lexicographic order
     `plot_umap_for_samples` uses, and passing it to every `color_map=` keeps one cluster
-    one colour across the deck. It reproduces the Plots code's own assignment; the Latch
+    one color across the deck. It reproduces the Plots code's own assignment; the Latch
     H5 viewer's order is not stored anywhere, so it can still differ from what the customer
     sees there (references/figures.md, check 4).
     """
@@ -800,8 +800,8 @@ def natural_sort(values):
     """Sort labels so C1, C2, ... C10, C15 come out in numeric order.
 
     The ported `sort_group_categories` is lexicographic (C1, C10, C11, ... C2), which is
-    the order `plot_umap_for_samples` assigns colours in. The delivered decks DISPLAY the
-    legend numerically, so draw/legend order and colour-assignment order differ; keep the
+    the order `plot_umap_for_samples` assigns colors in. The delivered decks DISPLAY the
+    legend numerically, so draw/legend order and color-assignment order differ; keep the
     two concerns separate rather than changing the ported function.
     """
     def key(v):
@@ -1188,8 +1188,8 @@ def refseq_gene(gene, genome="mm39", track="ncbiRefSeqCurated", pad=5000, timeou
 # --------------------------------------------- paired spatial + UMAP gene blocks
 #
 # The delivered gene-activity slide does NOT show spatial panels alone: each marker gene
-# appears as its spatial maps across samples AND a UMAP coloured by that same gene, under
-# one shared colour scale. The pair is what makes the slide readable -- the spatial maps
+# appears as its spatial maps across samples AND a UMAP colored by that same gene, under
+# one shared color scale. The pair is what makes the slide readable -- the spatial maps
 # show where the signal sits in the tissue, the UMAP shows which cluster carries it.
 # Build this pairing by default for marker genes when composing a deck from scratch.
 
@@ -1200,7 +1200,7 @@ FEATURE_COLORSCALE = "RdYlBu_r"
 
 def feature_umap(adata, feature, colorscale=FEATURE_COLORSCALE, point_size=2.0,
                  vmin=None, vmax=None, width=430, height=430, coloraxis=None):
-    """One combined UMAP of every cell, coloured by a continuous feature.
+    """One combined UMAP of every cell, colored by a continuous feature.
 
     `feature_panels(include_umap=True)` returns a per-SAMPLE grid of UMAPs; the delivered
     slide shows a single UMAP over all cells, which is this.
@@ -1228,7 +1228,7 @@ def gene_activity_block(adata, feature, samples=None, sample_labels=None,
                         row_label=None, colorscale=FEATURE_COLORSCALE, pt_size=2.6,
                         umap_point_size=1.8, panel_w=240, height=300,
                         equal_aspect=True, shared_scale=True):
-    """One marker gene as spatial panels per sample PLUS a UMAP, on a shared colour scale.
+    """One marker gene as spatial panels per sample PLUS a UMAP, on a shared color scale.
 
     This is the unit the delivered gene-activity slide is built from; four of them tile
     the slide. `row_label` is written down the left edge ("Cd3e: T cell") the way the
@@ -1454,7 +1454,7 @@ def motif_rank_plot(df, group_name="GroupA", y_col="MeanDiff", color_col="FDR",
     """Rank plot of differential motifs, matching the delivered slide's settings.
 
     These arguments are not arbitrary: plots_epigenome/compare/motif_results.py calls
-    plot_ranked_feature_plotly with exactly rank-by MeanDiff, colour-by FDR, PuBu_r,
+    plot_ranked_feature_plotly with exactly rank-by MeanDiff, color-by FDR, PuBu_r,
     4 labels and marker size 6.
     """
     sub = df[df["group_name"] == group_name] if "group_name" in df else df
@@ -1497,7 +1497,7 @@ def feature_violin(adata, feature, group_by, order=None, colors=None,
     return fig, {"feature": feature, "group_by": group_by, "groups": groups, "stats": stats}
 
 
-#: Colours the delivered CD19_high map uses: the selected conditions in the H5 palette,
+#: Colors the delivered CD19_high map uses: the selected conditions in the H5 palette,
 #: unselected cells in a neutral tint so they read as background rather than a category.
 COMPARE_NULL_COLOR = "#E7DAD5"
 
@@ -1584,10 +1584,10 @@ def auto_feature_config(project, cells, n_genes: int = 3, genome: Optional[str] 
         "Marker genes were chosen from the data, not from the tissue's known cell types: "
         f"the top informative gene of each of the {len(genes)} largest clusters, "
         f"{', '.join(picked)}. Rule: {rule.replace('top 50 by FDR', 'best FDR first')}.",
-        "Gene rows are labelled by cluster, not cell type; no cell types were assigned.",
+        "Gene rows are labeled by cluster, not cell type; no cell types were assigned.",
         "No differential motif slide: no comparison was chosen and no Compare run was "
         "launched.",
-        "Cluster colours use the default palette; they will not match the Latch viewer's.",
+        "Cluster colors use the default palette; they will not match the Latch viewer's.",
     ]
     return cfg, assumptions
 
