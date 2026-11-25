@@ -5,7 +5,7 @@ lists the generators and the rules every figure follows; read the matching secti
 before producing that figure for the first time in a session.
 
 Contents: the four pre-release checks in detail; marker-gene panels; the Track Browser
-slide; the differential motif slide; motif sequence logos.
+slide; the motif activity slide; the differential motif slide; motif sequence logos.
 
 ## The four pre-release checks in detail
 
@@ -216,6 +216,24 @@ and the locus you used rather than tuning the window until the number agrees -- 
 panel must match a delivered one exactly, ask the scientist for the locus they viewed.
 
 Placing this figure on its slide: see `references/deck.md`.
+
+## The motif activity slide
+
+No Compare run is needed. `render_figures.py` draws one block per motif in `motifs`: the
+chromVAR deviation z-score per spot for each sample plus the UMAP, on one color scale
+(`gene_activity_block`, the gene slide's unit), with the motif's CisBP logo beside it.
+`build_report_deck.py` puts up to four on a slide.
+
+- **What chose the motif is not what the panel shows.** `top_motifs` ranks enrichment of
+  motif matches in marker peaks; the panel shows deviation (activity). A motif can be
+  enriched in a cluster's peaks and show little deviation there. Label rows by how the
+  motif was chosen ("enriched in C5 peaks", "higher in KO") and keep the rule in the notes.
+- **TF families share motifs.** Ascl1, Tcf3, Tcf4 and Myod1 have near-identical motifs, so
+  their deviations move together; the panel says the motif is active, not which family
+  member binds it. Say so before a slide names a TF.
+- **Names.** Tables use the CisBP form (`Ascl1_780`), the h5ad the hyphen form
+  (`Ascl1-780`); `motif_feature_name()` converts. Enrichment tables from human projects
+  are upper case (`SPIB_336`); match case-insensitively.
 
 ## The differential motif slide
 

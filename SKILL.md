@@ -126,11 +126,14 @@ the deck is a draft for the scientist to correct.
 1. **Choose the features yourself.** If the sample table gives organ and species, pick
    canonical marker genes for that tissue's main cell types and keep only those with
    FDR <= 0.05 for some cluster in `p.top_ranked_genes("cluster")`. Label each row with
-   the cell type and the cluster that carries it. Write them to a JSON file with the
-   `CONFIG` keys plus an `"assumptions"` list of sentences saying what you chose and why,
-   and pass it with `--config`. If organ or species is unknown, use `--one-shot` instead:
-   it takes the best-FDR informative gene of each of the three largest clusters and
-   labels rows by cluster only (`atx_figures.auto_feature_config`).
+   the cell type and the cluster that carries it. Choose motifs the same way: the TFs
+   that define those cell types, kept if `p.top_motifs("cluster")` or
+   `p.top_condition_motifs()` supports them. Write them to a JSON file with the `CONFIG`
+   keys plus an `"assumptions"` list of sentences saying what you chose and why, and pass
+   it with `--config`. If organ or species is unknown, use `--one-shot` instead: it takes
+   the best-FDR informative gene of each of the three largest clusters, the most enriched
+   motif of the two largest, and the top motif of each condition, and labels rows by
+   cluster or condition only (`atx_figures.auto_feature_config`).
 2. **Render and build in one box job**: `python render_figures.py <project> --one-shot`
    (or `--config <file>`), then `python build_report_deck.py . --draft`, then render the
    deck with LibreOffice and look at every slide (`references/deck.md`, "Visual review").
@@ -141,9 +144,11 @@ the deck is a draft for the scientist to correct.
 What one-shot still never does:
 
 - **Launch compare clusters.** A launch spends Latch compute and needs a comparison
-  someone chose, so it keeps its confirmation. The differential-motif slide is left out
-  unless the scientist named a Compare run when choosing one-shot (`compare_run` and
-  `compare_mapping` in the config, mapping checked with `check_group_mapping`).
+  someone chose, so it keeps its confirmation. Only the Compare slide (GroupA vs GroupB)
+  is left out, unless the scientist named a Compare run when choosing one-shot
+  (`compare_run` and `compare_mapping` in the config, mapping checked with
+  `check_group_mapping`). The motif activity slide needs no Compare run; it is made whenever
+  motifs pass the rules.
 - **Recompute statistics**, skip the four checks, or claim biology. Slide titles are
   descriptive (`build_report_deck.py`), and every differential number keeps its rule.
 - **Delete the cache.** Clear the job scratch as usual, keep the project cache, and ask
@@ -186,12 +191,14 @@ motifs, the Compare run and the GroupA/GroupB mapping. **That block is scientifi
 not boilerplate**: it is the one place a wrong answer looks like a right one, so confirm
 it with the scientist before rendering. Ask in their terms, never by the block's name:
 "Which marker genes should I show, and what cell type does each mark?", "Any motifs of
-interest?", "Which comparison should the differential slide use, and which samples or
-clusters are on each side?" Then fill the block (or a `--config` file) yourself from the
-answers. A project with no entry gets the standard figures
+interest, or shall I start from the motifs that differ most between clusters and
+conditions?", and only if they want two groups of their own compared (a region, a set
+of clusters), "Which cells are on each side?" Then fill the block (or a `--config` file)
+yourself from the answers. Motif panels need only the motifs; a Compare run is needed
+for the GroupA-vs-GroupB slide alone. A project with no entry gets the standard figures
 only: the gene, coverage-track and motif panels are skipped, not guessed. `--config
 <file.json>` supplies the choices without editing the script, and `--one-shot` picks
-marker genes from the data (see "One-shot report"). Every figure runs under a guard that
+marker genes and motifs from the data (see "One-shot report"). Every figure runs under a guard that
 records failures (and skips) in `render_report.json` and keeps going. It also writes
 `samples_<project>.csv`, the sample table.
 
@@ -319,19 +326,35 @@ Then, depending on what the scientist wants:
   lists as candidates to interpret, not as cell-type calls. For pairwise results, look
   in `compare_outs/` (below).
 - **Motifs.** Ask whether there are specific motifs of interest, whether to scan the
-  literature, or whether to start from the project's top differential motifs.
+  literature, or whether to start from the project's top differential motifs. Those are
+  already computed per cluster, sample and condition, so they need no Compare run:
+  - `p.top_motifs(level)` reads `tables/enrichedMotifs_{cluster,sample,condition_<n>}.csv`:
+    motifs over-represented in each group's marker peaks (hypergeometric).
+  - `p.top_condition_motifs()` reads `tables/volcanoMarkers_motifs_<n>_<condition>.csv`:
+    motifs with higher chromVAR deviation in each condition than in the other cells
+    (Wilcoxon). These exist only when the project has two or more conditions. The
+    workflow drops rows with adjusted p == 0 before writing them, so a missing motif is
+    not "not differential".
+
+  Enrichment in peaks and deviation activity are different questions; say which one a
+  list or slide shows, and quote the rule each function returns. The motif panels plot
+  deviation whichever table chose the motif.
 - **Comparisons between groups** (conditions, clusters, samples, cell types): compare
   clusters, below. Warn that a new run happens on Latch and may take an hour or more.
 
 **Choosing features for gene/motif panels.** Use a supplied gene list (what the scientist
 usually has in mind), marker sets for the tissue's common cell types that you assemble and
-they edit, or the top-ranked genes per cluster. Motifs are named with a numeric suffix
+they edit, or the top-ranked genes per cluster; likewise for motifs, from the scientist,
+the literature, or `top_motifs` / `top_condition_motifs`. Motifs are named with a numeric suffix
 (`Ascl1-780`, `Runx1-712`); match case-insensitively against `combined_motifs.h5ad`
 `var_names` and report anything missing rather than silently dropping it.
 
 ### Differential analysis: FETCH the statistics, never recompute them
 
-For any differential result (genes, peaks or motifs, on a slide or in an answer), read
+Per-cluster, per-sample and per-condition results are already in `tables/` (above). Compare
+clusters is for two groups someone defines: a region, a set of clusters, cells of one
+cluster in two conditions. For any such result (genes, peaks or motifs, on a slide or in
+an answer), read
 `references/differential_analysis.md` first and use `scripts/atx_compare.py`. GroupA and
 GroupB rows are separate tests, so report one side; there are three different significance
 rules, and known defects in older runs' output files.
@@ -429,7 +452,7 @@ carries the test and threshold that produced it.
 | File | Read it when |
 |---|---|
 | `references/figure_catalog.md` | planning the figure list; provenance, measured geometry, QC-table column rules and rounding, what was verified against which deck |
-| `references/figures.md` | producing a figure for the first time: the four checks in detail, marker-gene panels, Track Browser, differential motif slide, motif logos |
+| `references/figures.md` | producing a figure for the first time: the four checks in detail, marker-gene panels, Track Browser, motif activity slide, differential motif slide, motif logos |
 | `references/differential_analysis.md` | any differential result, or launching compare clusters |
 | `references/pipeline.md` | where a number came from, why a QC value looks off, which workflow wrote a folder, ArchR vs SnapATAC, whole-transcriptome and co-profiling in brief (`tables/input_parameters.csv` holds a project's actual parameters) |
 | `references/deck.md` | building the deck |

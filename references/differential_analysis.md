@@ -5,6 +5,21 @@ and how to read the result without misreporting it. Read this before quoting any
 GroupA-vs-GroupB number or building a differential slide. `scripts/atx_compare.py`
 implements everything below.
 
+**Not every differential question needs compare clusters.** Each cluster, sample and
+condition against all other cells is already in the project's `tables/` (archrproject and
+ATX_snap `archr_objs.R`):
+
+| Question | Table | Reader |
+|---|---|---|
+| Marker genes per group | `ranked_genes_per_{cluster,sample,condition}.csv` | `Project.top_ranked_genes` |
+| Motifs enriched in each group's marker peaks (hypergeometric) | `enrichedMotifs_{cluster,sample,condition_<n>}.csv` | `Project.top_motifs` |
+| Motif activity (chromVAR deviation) higher in one condition, all cells and per cluster (Wilcoxon) | `volcanoMarkers_motifs_<n>_<condition>.csv` | `Project.top_condition_motifs` |
+
+The volcano tables are filtered before they are written (rows with adjusted p == 0 or
+|MeanDiff| >= 1.2 are dropped), and their `Significance` column uses raw p < 0.01. Compare
+clusters is for two groups someone defines, such as a region, a set of clusters, or one
+cluster's cells in two conditions.
+
 Sources (read in full, not summarised from the docs):
 
 - workflow `atlasxomics/combined_cluster_wf` v0.10.8 (`8cdf2d1`): `wf/compare_task.py`,

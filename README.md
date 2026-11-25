@@ -26,7 +26,7 @@ scripts/validate_selftest.py  checks that every deck validation rule fires on a 
 scripts/cleanup.py            end-of-session cleanup of the box's scratch and cache
 references/figure_catalog.md  provenance of every figure, measured geometry, QC column rules
 references/figures.md         per-figure detail: the four checks, marker genes, track browser,
-                              differential motif slide, motif logos
+                              motif activity and differential motif slides, motif logos
 references/differential_analysis.md   how compare clusters computes differential genes/peaks/motifs
 references/pipeline.md        the ATX processing pipeline (epigenomics in depth; WT and co-profiling in brief)
 references/deck.md            deck assembly: template, slide structures, validation, layout traps

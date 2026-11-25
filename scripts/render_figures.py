@@ -13,13 +13,15 @@ Every figure is produced under `guard()`, so one failure is reported in
 dies on figure 3 wastes the twenty minutes already spent.
 
 THE CONFIG BLOCK IS NOT BOILERPLATE. The marker genes, the motifs and the Compare run are
-per-project scientific choices. Confirm them with whoever ordered the report before
+per-project scientific choices. Motif panels need only the motifs; the Compare run is for
+the GroupA-vs-GroupB slide alone. Confirm them with whoever ordered the report before
 rendering; see "Choosing features for gene/motif panels" (Part 3) in SKILL.md. The
 exception is a one-shot report, where the scientist has asked for best assumptions
 instead of confirmations: `--config` takes a JSON file with the same keys (what you
-chose for the tissue), and `--one-shot` without it picks marker genes from the data
-(`atx_figures.auto_feature_config`). Either way the choices are written to
-`render_report.json` under "assumptions" for the deck to print.
+chose for the tissue), and `--one-shot` without it picks marker genes from the data and
+motifs from the project's own motif tables (`atx_figures.auto_feature_config`). Either
+way the choices are written to `render_report.json` under "assumptions" for the deck to
+print.
 """
 import argparse
 import json
@@ -36,7 +38,7 @@ from atx_project import Project
 _ap = argparse.ArgumentParser()
 _ap.add_argument("project", nargs="?", default="Demo_001")
 _ap.add_argument("--one-shot", action="store_true",
-                 help="no CONFIG entry needed: choose marker genes from the data")
+                 help="no CONFIG entry needed: choose marker genes and motifs from the data")
 _ap.add_argument("--config", help="JSON file of feature choices (CONFIG keys)")
 ARGS = _ap.parse_args()
 PROJ = ARGS.project
@@ -49,6 +51,7 @@ CONFIG = {
         "gene_rows": {"Cd3e": "Cd3e: T cell", "Cd19": "Cd19: B cell",
                       "Hmox1": "Hmox1:<br>red pulp macrophage"},
         "motifs": ["Ascl1-780", "Runx1-712"],
+        "motif_rows": {},
         "compare_run": "Demo_CD19_high_CondA_vs_CondB",
         "compare_column": "CD19_high",
         # Which of the workflow's GroupA/GroupB is which: confirm against the cell
@@ -73,6 +76,7 @@ STANDARD_ONLY = {
     "genes": [],
     "gene_rows": {},
     "motifs": [],
+    "motif_rows": {},               # motif -> row label, like gene_rows
     "compare_run": None,
     "compare_column": None,
     "compare_mapping": None,
@@ -90,16 +94,17 @@ else:
 cells = p.cell_adata()
 if cfg is None and ARGS.one_shot:
     cfg, assumptions = F.auto_feature_config(p, cells)
-    print(f"One-shot: marker genes chosen from the data: {cfg['genes']}")
+    print(f"One-shot: chosen from the data: genes {cfg['genes']}, motifs {cfg['motifs']}")
 elif cfg is None:
     cfg = dict(STANDARD_ONLY)
     print(f"No feature configuration for {PROJ!r}: rendering the standard figures only. "
-          "Gene-activity, coverage-track and differential-motif panels are skipped until "
-          "marker genes, motifs and a comparison are agreed with the scientist.")
+          "Gene-activity, coverage-track, motif and Compare panels are skipped until "
+          "marker genes, motifs and (for Compare) a comparison are agreed with the scientist.")
 if not cfg.get("genome"):
     cfg["genome"] = str(p.input_parameters()["genome"])
 if cfg.get("logo_genome") is None:
     cfg["logo_genome"] = F.LOGO_GENOME.get(cfg["genome"], "mm10")
+cfg.setdefault("motif_rows", {})
 # One palette for every figure. A named palette (e.g. "DEMO_CLUSTER_COLORS") or an
 # explicit {cluster: hex} dict from a JSON config wins; otherwise pin the H5 default in
 # the viewer's order. Never leave this None: the generators' own defaults disagree with
@@ -315,7 +320,37 @@ for lvl in levels:
 if "sample" not in levels:
     skip("peaks_per_sample", "single-sample project")
 
-# --- slide 11: differential motifs, from the Compare workflow's own statistics ---------
+# --- slide 11: motif activity (chromVAR deviations) + logos; no Compare run needed ----
+def _motif_blocks():
+    cells_m, missing = F.add_features(p, cells, cfg["motifs"], kind="motifs")
+    if missing:
+        report["notes"].append(f"motifs absent from the h5ad: {missing}")
+    for m in cfg["motifs"]:
+        if m in missing:
+            continue
+        fig, info = F.gene_activity_block(cells_m, m, samples=samples,
+                                          sample_labels=labels,
+                                          row_label=cfg["motif_rows"].get(m, m),
+                                          panel_w=250, height=420,
+                                          shared_scale=SHARED_SCALE)
+        fig.write_image(f"{PROJ}__motif_block_{m}.png", scale=2)
+        report["figures"][f"motif_block_{m}"] = {"png": f"{PROJ}__motif_block_{m}.png",
+                                                 "mean": info.get("mean")}
+        print(f"OK   motif_block_{m}  mean {info.get('mean')}")
+        # motif_logo returns a PLOTLY figure (not matplotlib), so it saves the same way
+        # as every other plotly panel here. A missing logo must not cost the block.
+        try:
+            lg, linfo = F.motif_logo(m, genome=cfg["logo_genome"])
+            emit(lg, f"logo_{m}", 700, 320)
+            print(f"OK   logo_{m}  len {linfo['length']}")
+        except Exception as e:  # noqa: BLE001
+            report["notes"].append(f"no logo for {m}: {type(e).__name__}: {e}")
+if cfg["motifs"]:
+    guard("motif_blocks", _motif_blocks)
+else:
+    skip("motif_blocks", "no motifs chosen yet")
+
+# --- slide 11b: Compare (GroupA vs GroupB) motifs, from the Compare run's statistics ---
 def _motifs():
     ann = F.fetch_compare_annotation(p, cfg["compare_run"], column=cfg["compare_column"])
     cells3 = cells.copy()
@@ -343,11 +378,6 @@ def _motifs():
         emit(F.feature_violin(sub, m, cfg["compare_column"],
                               order=cfg["compare_groups"][::-1])[0],
              f"motif_violin_{m}", 520, 430)
-        # motif_logo returns a PLOTLY figure (not matplotlib), so it saves the same way
-        # as every other plotly panel here.
-        lg, linfo = F.motif_logo(m, genome=cfg["logo_genome"])
-        emit(lg, f"logo_{m}", 700, 320)
-        print(f"OK   logo_{m}  len {linfo['length']}")
 
     df = F.fetch_compare_results(p, cfg["compare_run"], feature="motif")
     df.to_csv(f"{PROJ}__all_motifs.csv", index=False)
@@ -356,7 +386,8 @@ def _motifs():
 if cfg["compare_run"] and cfg["motifs"]:
     guard("motifs", _motifs)
 else:
-    skip("motifs", "no compare run / motifs chosen yet")
+    skip("motifs", "no Compare run chosen (only the GroupA-vs-GroupB slide needs one)"
+         if cfg["motifs"] else "no motifs chosen yet")
 
 # --- appendix: the QC table and its spatial maps --------------------------------------
 def _qc():

@@ -134,7 +134,26 @@ def report_slides(d: str, report: dict):
         left_out.append("peaks")
 
     motifs = cfg.get("motifs", [])
-    if motifs and ok("motifs"):
+    mrows = cfg.get("motif_rows", {})
+    have = [(m, f(f"motif_block_{m}"), f(f"logo_{m}")) for m in motifs]
+    have = [(m, b, lg) for m, b, lg in have if b]
+    for i in range(0, len(have), 4):  # four motif rows fill a slide
+        part = have[i:i + 4]
+        spec = {"title": "Motif activity of selected motifs",
+                "subtitle": "chromVAR deviation z-score per spot",
+                "notes": "Motifs: " + ", ".join(mrows.get(m, m) for m, _, _ in part)}
+        if all(lg for _, _, lg in part):
+            spec.update({"columns": [[b for _, b, _ in part], [lg for _, _, lg in part]],
+                         "column_titles": ["", "Motif (CisBP)"],
+                         "column_weights": [3, 1]})
+        else:
+            blocks_m = [b for _, b, _ in part]
+            spec["grid"] = [blocks_m[j:j + 2] for j in range(0, len(blocks_m), 2)]
+        slides.append(spec)
+    if motifs and not have:
+        left_out.append("motif activity")
+
+    if motifs and ok("motifs") and cfg.get("compare_run"):
         grid = []
         for m in motifs:
             sel, logo, vio = f(f"motif_sel_{m}"), f(f"logo_{m}"), f(f"motif_violin_{m}")

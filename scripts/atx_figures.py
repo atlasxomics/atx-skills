@@ -1551,13 +1551,87 @@ LOGO_GENOME = {"mm39": "mm10", "mm10": "mm10", "hg38": "hg38", "hg19": "hg38",
                "rn6": "rn6", "rn7": "rn6", "rn8": "rn6"}
 
 
+def auto_motifs(project, clusters, n_cluster: int = 2, n_condition: int = 2,
+                motif_names=None):
+    """Motifs for a one-shot report, from the tables the workflow already wrote.
+
+    - Cluster motifs: the most enriched motif in the marker peaks of each cluster in
+      `clusters` (largest first), up to `n_cluster` (`Project.top_motifs`).
+    - Condition motifs, when the project has conditions: the motif with the most
+      significantly higher chromVAR deviation in each condition over all cells, up to
+      `n_condition` (`Project.top_condition_motifs`).
+
+    `motif_names`, if given, are the combined_motifs.h5ad feature names; a candidate not
+    among them is passed over (matched case-insensitively). No Compare run is involved.
+
+    Returns (motifs, motif_rows, notes): notes are sentences for the assumptions slide.
+    """
+    lookup = None if motif_names is None else {str(m).lower(): str(m) for m in motif_names}
+    motifs, rows, notes = [], {}, []
+
+    def take(feature):
+        name = feature if lookup is None else lookup.get(str(feature).lower())
+        if name is None or name in motifs:
+            return None
+        motifs.append(name)
+        return name
+
+    try:
+        top, rule = project.top_motifs("cluster", n=20)
+        picked = []
+        for cl in clusters:
+            cand = top.loc[top["group"].astype(str) == str(cl), "feature"]
+            for f in cand:
+                name = take(f)
+                if name:
+                    rows[name] = f"{name}: enriched in {cl} peaks"
+                    picked.append(f"{name} ({cl})")
+                    break
+            if len(picked) == n_cluster:
+                break
+        if picked:
+            notes.append("Cluster motifs were chosen from the data: the most enriched motif "
+                         f"in each of the largest clusters' marker peaks, {', '.join(picked)}. "
+                         f"Rule: {rule.replace('top 20 by', 'best first by')}. The panels show each motif's chromVAR deviation, "
+                         "which is activity, not the enrichment used to choose it.")
+        else:
+            notes.append("No cluster motif was shown: no motif passed adjusted p <= 0.05 in "
+                         f"the largest clusters' marker peaks ({rule}).")
+    except FileNotFoundError as e:
+        notes.append(f"No cluster motif was shown: {e}.")
+
+    try:
+        top, rule = project.top_condition_motifs(n=5)
+        picked = []
+        for cond, sub in top.groupby("condition", sort=False):
+            for f in sub["feature"]:
+                name = take(f)
+                if name:
+                    rows[name] = f"{name}: higher in {cond}"
+                    picked.append(f"{name} ({cond})")
+                    break
+            if len(picked) == n_condition:
+                break
+        if picked:
+            notes.append("Condition motifs were chosen from the data: the motif with the most "
+                         "significantly higher activity in each condition than in all other "
+                         f"cells, {', '.join(picked)}. Rule: "
+                         f"{rule.replace('top 5 by p_val_adj', 'best p_val_adj first')}")
+    except FileNotFoundError:
+        pass  # no conditions: nothing to choose, nothing to explain
+    return motifs, rows, notes
+
+
 def auto_feature_config(project, cells, n_genes: int = 3, genome: Optional[str] = None):
     """A render_figures config built from the data alone, for a one-shot report.
 
     Marker genes: the best-FDR informative gene of each of the `n_genes` largest clusters
     (`Project.top_ranked_genes`), one gene per cluster, no repeats; a cluster with no
-    qualifying gene is passed over for the next largest. No motifs and no Compare run:
-    those need a comparison someone chose, so the differential-motif slide is left out.
+    qualifying gene is passed over for the next largest.
+
+    Motifs: `auto_motifs`, from the project's own enrichedMotifs and volcanoMarkers_motifs
+    tables, checked against combined_motifs.h5ad. No Compare run: that needs two groups
+    someone defined, so only the Compare (GroupA vs GroupB) slide is left out.
 
     Returns (config, assumptions). Every entry in `assumptions` is a sentence for the
     scientist; the one-shot deck prints them on its last slide.
@@ -1576,17 +1650,31 @@ def auto_feature_config(project, cells, n_genes: int = 3, genome: Optional[str] 
         if len(genes) == n_genes:
             break
     genome = genome or str(project.input_parameters().get("genome", "")) or None
+    try:
+        motif_names = list(project.feature_adata("motifs", backed=True).var_names)
+    except Exception as e:  # noqa: BLE001 -- no motif object means no motif panels
+        motif_names, motif_err = [], f"{type(e).__name__}: {e}"
+    else:
+        motif_err = None
+    if motif_err:
+        motifs, motif_rows = [], {}
+        motif_notes = [f"No motif slide: combined_motifs.h5ad could not be read ({motif_err})."]
+    else:
+        motifs, motif_rows, motif_notes = auto_motifs(project, list(sizes.index),
+                                                      motif_names=motif_names)
     cfg = {"genome": genome, "logo_genome": LOGO_GENOME.get(genome or "", "mm10"),
-           "genes": genes, "gene_rows": rows, "motifs": [], "compare_run": None,
-           "compare_column": None, "compare_mapping": None, "compare_groups": [],
-           "colors": None}
+           "genes": genes, "gene_rows": rows, "motifs": motifs, "motif_rows": motif_rows,
+           "compare_run": None, "compare_column": None, "compare_mapping": None,
+           "compare_groups": [], "colors": None}
     assumptions = [
         "Marker genes were chosen from the data, not from the tissue's known cell types: "
         f"the top informative gene of each of the {len(genes)} largest clusters, "
         f"{', '.join(picked)}. Rule: {rule.replace('top 50 by FDR', 'best FDR first')}.",
-        "Gene rows are labeled by cluster, not cell type; no cell types were assigned.",
-        "No differential motif slide: no comparison was chosen and no Compare run was "
-        "launched.",
+        "Gene and motif rows are labeled by cluster or condition, not cell type; no cell "
+        "types were assigned.",
+        *motif_notes,
+        "No Compare slide (GroupA vs GroupB): that needs two groups chosen by a scientist, "
+        "and no Compare run was launched.",
         "Cluster colors use the default palette; they will not match the Latch viewer's.",
     ]
     return cfg, assumptions

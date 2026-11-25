@@ -43,6 +43,28 @@ def short_run_id(run_id):
     return f"{m.group(1)}{int(m.group(2))}" if m else head
 
 
+def motif_feature_name(motif: str) -> str:
+    """CisBP/ArchR motif name -> the combined_motifs.h5ad feature name: the numeric suffix
+    takes a hyphen (`Ascl1_780` -> `Ascl1-780`), as the workflow's own heatmaps do."""
+    import re
+    return re.sub(r"_(\d+)$", r"-\1", str(motif).strip())
+
+
+def make_r_name(name: str) -> str:
+    """What R's `make.names` does to a column name: invalid characters become dots and a
+    leading digit gets an X (`WT-1` -> `WT.1`, `0` -> `X0`)."""
+    import re
+    s = re.sub(r"[^0-9A-Za-z._]", ".", str(name))
+    return f"X{s}" if re.match(r"^(\d|\.\d)", s) or not s else s
+
+
+def r_colname(name: str) -> str:
+    """Undo the X that R prefixes to a numeric column name (`X0` -> `0`). Other mangling
+    (`-` -> `.`) cannot be undone; compare names after `make_r_name` instead."""
+    import re
+    return re.sub(r"^X(?=\d)", "", str(name))
+
+
 def parse_slide_metadata(doc: dict) -> dict:
     """Flatten a fastq2frags `run_metrics/slide_metadata.json` into {title: value}.
 
@@ -353,6 +375,152 @@ class Project:
         rule = (f"ranked_genes_per_{level}: ArchR getMarkerFeatures, GeneScoreMatrix, t-test, "
                 f"bias TSSEnrichment + log10(nFrags), each {level} vs all other cells; "
                 f"FDR <= {fdr}, Log2FC > 0, top {n} by {sort_by}")
+        return top, rule
+
+    # ---------------------------------------------------------------- motif tables
+    # The analysis workflow (archrproject and ATX_snap, archr_objs.R) writes two kinds of
+    # per-group motif result. They answer different questions; say which one a slide uses.
+    #   enrichedMotifs_<level>.csv     ENRICHMENT: are a motif's matches over-represented in
+    #                                  this group's marker peaks? (peakAnnoEnrichment,
+    #                                  hypergeometric). Per cluster, sample and condition.
+    #   volcanoMarkers_motifs_<n>_<c>  ACTIVITY: is the motif's chromVAR deviation higher
+    #                                  in condition c than in the other cells? (Wilcoxon on
+    #                                  the MotifMatrix). Only when the project has conditions.
+    # Neither needs a Compare run. Compare is for two groups someone defines (a region, a
+    # subset of clusters), not for the clusters, samples and conditions already in the
+    # project.
+
+    def enriched_motifs(self, level: str = "cluster") -> pd.DataFrame:
+        """`tables/enrichedMotifs_<level>.csv`, tidied to one row per motif and group.
+
+        ArchR `peakAnnoEnrichment` of CisBP motif matches in each group's marker peaks
+        (getMarkerFeatures on the PeakMatrix, Wilcoxon, each group vs all other cells,
+        marker cut-off "Pval <= 0.05 & Log2FC >= 0.1"), hypergeometric against all peaks
+        (archrproject/wf/archr_objs.R, utils.R get_enriched_motifs).
+
+        `level` is cluster, sample or condition_<n> ("condition" means condition_1).
+
+        The CSV is the SummarizedExperiment's assays written with `data.frame()`: one block
+        of rows per assay (`group_name` = mlog10Padj, mlog10p, Enrichment, nCompare,
+        CompareProportion, BackgroundProporition [sic], ..., feature) and one column per
+        group. R de-duplicates the row names across blocks by appending digits (TFAP2B_1,
+        TFAP2B_12, TFAP2B_19) and prefixes numeric group names with X, so motif names are
+        read from the `feature` block and group names are un-mangled here. Returns columns
+        motif (CisBP name, `Ascl1_780`), feature (the combined_motifs.h5ad name,
+        `Ascl1-780`), group, then one column per assay.
+        """
+        if level == "condition":
+            level = "condition_1"
+        name = f"enrichedMotifs_{level}.csv"
+        if name not in set(latch_ls(f"{self.latch_root}/tables")):
+            raise FileNotFoundError(f"no tables/{name} for {self.name}")
+        raw = pd.read_csv(self.table(name), index_col=0)
+        cols = ["motif", "feature", "group"]
+        if raw.empty or "group_name" not in raw.columns:
+            return pd.DataFrame(columns=cols)  # the workflow writes an empty table on failure
+        groups = [c for c in raw.columns if c not in ("group", "group_name")]
+        names = raw["group_name"].astype(str)
+        feat = raw[names == "feature"]
+        motifs = (feat[groups[0]].astype(str).to_numpy() if len(feat)
+                  else raw[raw["group"] == raw["group"].min()].index.astype(str).to_numpy())
+        tidy = None
+        for assay in pd.unique(names[names != "feature"]):
+            block = raw[names == assay]
+            if len(block) != len(motifs):
+                raise ValueError(f"{name}: {assay} has {len(block)} rows for "
+                                 f"{len(motifs)} motifs; the block layout has changed")
+            vals = pd.DataFrame(block[groups].to_numpy(dtype=float), columns=groups)
+            vals.insert(0, "motif", motifs)
+            long = vals.melt(id_vars="motif", var_name="group", value_name=assay)
+            tidy = long if tidy is None else tidy.merge(long, on=["motif", "group"])
+        tidy["group"] = tidy["group"].map(r_colname)
+        tidy.insert(1, "feature", tidy["motif"].map(motif_feature_name))
+        return tidy
+
+    def top_motifs(self, level: str = "cluster", n: int = 10, padj: float = 0.05,
+                   groups: Optional[List[str]] = None):
+        """The `n` motifs most enriched in each group's marker peaks: adjusted p <= `padj`
+        and Enrichment > 1, ranked by mlog10Padj then Enrichment.
+
+        Returns (table, rule). Quote the rule with any list you show. This is enrichment of
+        motif MATCHES in marker peaks, not motif activity: to show activity, plot the
+        motif's chromVAR deviation (`add_features(..., kind="motifs")`) and say so.
+        Group names follow R's `make.names`, so a sample called `WT-1` appears as `WT.1`;
+        `groups` is matched after the same mangling.
+        """
+        df = self.enriched_motifs(level)
+        if df.empty:
+            return df, f"enrichedMotifs_{level}: empty (no enrichment found by the workflow)"
+        if groups is not None:
+            want = {r_colname(make_r_name(str(g))) for g in groups}
+            df = df[df["group"].isin(want)]
+        sig = df[(df["mlog10Padj"] >= -np.log10(padj)) & (df["Enrichment"] > 1)]
+        top = (sig.sort_values(["group", "mlog10Padj", "Enrichment"],
+                               ascending=[True, False, False])
+                  .groupby("group", sort=False).head(n)
+                  [[c for c in ("group", "motif", "feature", "mlog10Padj", "Enrichment",
+                                "nCompare", "CompareProportion", "BackgroundProporition")
+                    if c in sig.columns]]
+                  .reset_index(drop=True))
+        rule = (f"enrichedMotifs_{level}: ArchR peakAnnoEnrichment (hypergeometric) of CisBP "
+                f"motif matches in each {level}'s marker peaks (Wilcoxon vs all other cells, "
+                f"Pval <= 0.05 & Log2FC >= 0.1) against all peaks; adjusted p <= {padj}, "
+                f"Enrichment > 1, top {n} by -log10 adjusted p")
+        return top, rule
+
+    def condition_motifs(self) -> pd.DataFrame:
+        """Every `tables/volcanoMarkers_motifs_<n>_<condition>.csv`, stacked.
+
+        ArchR getMarkerFeatures on the MotifMatrix (chromVAR deviations), Wilcoxon, bias
+        TSSEnrichment + log10(nFrags), each condition against all other cells: once over
+        all cells (`cluster` == "All", z-scores, at most 5000 cells per group) and once
+        within each cluster that is not >= 90% one condition. Columns: condition_set (the
+        <n>), condition, cluster, motif, feature, MeanDiff, p_val, p_val_adj.
+
+        The workflow FILTERS these tables before writing them: it drops motifs with no
+        deviation, rows with p_val_adj == 0, and rows with |MeanDiff| >= 1.2. The dropped
+        rows include the most significant ones, so a motif missing here is not "not
+        differential". Its `Significance` column uses raw p < 0.01; ignore it and use
+        p_val_adj. The per-cluster tests do not pass `useSeqnames = "z"`; until a real
+        table has been checked, prefer the "All" rows.
+        """
+        import re
+        files = sorted(f for f in latch_ls(f"{self.latch_root}/tables")
+                       if f.startswith("volcanoMarkers_motifs_") and f.endswith(".csv"))
+        if not files:
+            raise FileNotFoundError(f"no volcanoMarkers_motifs_*.csv for {self.name}: the "
+                                    "project has no conditions, or one condition only")
+        out = []
+        for f in files:
+            m = re.match(r"volcanoMarkers_motifs_(\d+)_(.+)\.csv$", f)
+            df = pd.read_csv(self.table(f), dtype={"cluster": str})
+            df = df.rename(columns={"gene": "motif"})
+            df.insert(0, "condition_set", int(m.group(1)) if m else None)
+            df.insert(1, "condition", m.group(2) if m else f)
+            df.insert(4, "feature", df["motif"].astype(str).map(motif_feature_name))
+            out.append(df.drop(columns=["Significance"], errors="ignore"))
+        return pd.concat(out, ignore_index=True)
+
+    def top_condition_motifs(self, n: int = 10, fdr: float = 0.05, cluster: str = "All"):
+        """The `n` motifs with the most significantly HIGHER deviation in each condition
+        than in all other cells (`cluster` = "All", or one cluster's within-cluster test):
+        p_val_adj <= `fdr` and MeanDiff > 0, ranked by p_val_adj then MeanDiff.
+
+        Returns (table, rule). Read the filtering caveat in `condition_motifs` before
+        saying a motif is not differential."""
+        df = self.condition_motifs()
+        df = df[df["cluster"].astype(str) == str(cluster)]
+        sig = df[(df["p_val_adj"] <= fdr) & (df["MeanDiff"] > 0)]
+        top = (sig.sort_values(["condition_set", "condition", "p_val_adj", "MeanDiff"],
+                               ascending=[True, True, True, False])
+                  .groupby(["condition_set", "condition"], sort=False).head(n)
+                  .reset_index(drop=True))
+        scope = "all cells" if cluster == "All" else f"cells of {cluster}"
+        rule = (f"volcanoMarkers_motifs: ArchR getMarkerFeatures, MotifMatrix (chromVAR "
+                f"deviations), Wilcoxon, bias TSSEnrichment + log10(nFrags), each condition "
+                f"vs the other conditions within {scope}; p_val_adj <= {fdr}, MeanDiff > 0, "
+                f"top {n} by p_val_adj. The workflow drops rows with p_val_adj == 0 or "
+                f"|MeanDiff| >= 1.2 before writing the table.")
         return top, rule
 
     def peak_call_summary(self, level: str = "cluster") -> pd.DataFrame:
